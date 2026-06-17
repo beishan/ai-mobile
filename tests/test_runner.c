@@ -135,6 +135,32 @@ static void test_font_draw_text_places_pixels_for_chinese(void) {
     font_free(&font);
 }
 
+static void test_weather_refresh_changes_counter(void) {
+    app_state_t app;
+    app_init(&app);
+    app.page = APP_PAGE_WEATHER;
+    app_handle_button(&app, APP_BUTTON_HOME);
+    ASSERT_EQ_INT(1, app.weather_refreshes);
+}
+
+static void test_english_flip_changes_state(void) {
+    app_state_t app;
+    app_init(&app);
+    app.page = APP_PAGE_ENGLISH;
+    ASSERT_EQ_INT(0, app.english_show_back);
+    app_handle_button(&app, APP_BUTTON_HOME);
+    ASSERT_EQ_INT(1, app.english_show_back);
+}
+
+static void test_snake_movement_changes_position(void) {
+    app_state_t app;
+    app_init(&app);
+    app.page = APP_PAGE_SNAKE;
+    int y = app.snake_y;
+    app_handle_button(&app, APP_BUTTON_UP);
+    ASSERT_TRUE(app.snake_y < y);
+}
+
 static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
     int count = 0;
     for (int y = 0; y < gfx_height(fb); y++) {
@@ -198,6 +224,9 @@ int main(void) {
     test_utf8_decoder_replaces_invalid_bytes();
     test_default_font_has_chinese_glyphs();
     test_font_draw_text_places_pixels_for_chinese();
+    test_weather_refresh_changes_counter();
+    test_english_flip_changes_state();
+    test_snake_movement_changes_position();
     test_home_render_uses_black_and_red();
     test_each_primary_page_renders_nonblank();
     puts("tests passed");
