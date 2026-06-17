@@ -150,16 +150,20 @@ static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
 static void test_home_render_uses_black_and_red(void) {
     gfx_framebuffer_t fb;
     app_state_t app;
+    font_t font;
     gfx_init(&fb);
     app_init(&app);
-    ui_render_page(&fb, &app);
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    ui_render_page(&fb, &app, &font);
     ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 100);
     ASSERT_TRUE(count_color(&fb, GFX_RED) > 100);
+    font_free(&font);
 }
 
 static void test_each_primary_page_renders_nonblank(void) {
     gfx_framebuffer_t fb;
     app_state_t app;
+    font_t font;
     app_page_t pages[] = {
         APP_PAGE_HOME,
         APP_PAGE_BOOKSHELF,
@@ -171,12 +175,14 @@ static void test_each_primary_page_renders_nonblank(void) {
         APP_PAGE_SNAKE
     };
     app_init(&app);
+    ASSERT_EQ_INT(1, font_load_default(&font));
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         gfx_init(&fb);
         app.page = pages[i];
-        ui_render_page(&fb, &app);
+        ui_render_page(&fb, &app, &font);
         ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 50);
     }
+    font_free(&font);
 }
 
 int main(void) {
