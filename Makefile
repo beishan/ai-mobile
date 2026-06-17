@@ -1,5 +1,5 @@
 CC ?= cc
-CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -I src
+CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -I src -I assets
 
 TEST_BIN := tests/test_runner
 TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/sim_display.c src/app/app_state.c src/ui/pages.c src/font/font.c

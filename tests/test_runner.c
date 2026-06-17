@@ -10,6 +10,8 @@
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 #define ASSERT_EQ_INT(expected, actual) ASSERT_TRUE((expected) == (actual))
 
+static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color);
+
 static void test_framebuffer_has_fixed_eink_size(void) {
     gfx_framebuffer_t fb;
     gfx_init(&fb);
@@ -116,6 +118,23 @@ static void test_utf8_decoder_replaces_invalid_bytes(void) {
     ASSERT_EQ_INT(0xfffd, (int)cp);
 }
 
+static void test_default_font_has_chinese_glyphs(void) {
+    font_t font;
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    ASSERT_TRUE(font_find_glyph(&font, 0x9605) != NULL);
+    font_free(&font);
+}
+
+static void test_font_draw_text_places_pixels_for_chinese(void) {
+    gfx_framebuffer_t fb;
+    font_t font;
+    gfx_init(&fb);
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    font_draw_text(&font, &fb, 10, 10, "阅读", GFX_BLACK);
+    ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 20);
+    font_free(&font);
+}
+
 static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
     int count = 0;
     for (int y = 0; y < gfx_height(fb); y++) {
@@ -171,6 +190,8 @@ int main(void) {
     test_settings_toggles_power_saving();
     test_utf8_decoder_reads_ascii_and_chinese();
     test_utf8_decoder_replaces_invalid_bytes();
+    test_default_font_has_chinese_glyphs();
+    test_font_draw_text_places_pixels_for_chinese();
     test_home_render_uses_black_and_red();
     test_each_primary_page_renders_nonblank();
     puts("tests passed");

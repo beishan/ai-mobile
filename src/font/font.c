@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 
+#include "fonts/sim_zh16.h"
+
 static void draw_replacement(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_t color) {
     gfx_draw_rect(fb, x, y, w, h, color);
     gfx_fill_rect(fb, x + 3, y + 3, w - 6, 2, color);
@@ -13,10 +15,10 @@ int font_load_default(font_t *font) {
         return 0;
     }
 
-    font->width = 16;
-    font->height = 16;
-    font->glyphs = NULL;
-    font->glyph_count = 0;
+    font->width = SIM_ZH16_WIDTH;
+    font->height = SIM_ZH16_HEIGHT;
+    font->glyphs = (const font_glyph_t *)sim_zh16_glyphs;
+    font->glyph_count = sim_zh16_glyph_count;
     return 1;
 }
 
@@ -94,6 +96,20 @@ const font_glyph_t *font_find_glyph(const font_t *font, uint32_t codepoint) {
     return NULL;
 }
 
+static void draw_glyph_bitmap(gfx_framebuffer_t *fb, const font_glyph_t *glyph, int x, int y, int w, int h, gfx_color_t color) {
+    const uint8_t *bitmap = glyph->bitmap;
+    int bytes_per_row = w / 8;
+
+    for (int row = 0; row < h; row++) {
+        for (int col = 0; col < w; col++) {
+            uint8_t byte = bitmap[row * bytes_per_row + col / 8];
+            if ((byte & (uint8_t)(1u << (7 - (col % 8)))) != 0) {
+                gfx_set_pixel(fb, x + col, y + row, color);
+            }
+        }
+    }
+}
+
 int font_measure_text(const font_t *font, const char *text) {
     const unsigned char *cursor = (const unsigned char *)text;
     int width = 0;
@@ -135,7 +151,12 @@ void font_draw_text(const font_t *font, gfx_framebuffer_t *fb, int x, int y, con
             draw_x += glyph_width / 2;
             continue;
         }
-        draw_replacement(fb, draw_x, y, glyph_width, glyph_height, color);
+        const font_glyph_t *glyph = font_find_glyph(font, cp);
+        if (glyph != NULL) {
+            draw_glyph_bitmap(fb, glyph, draw_x, y, glyph_width, glyph_height, color);
+        } else {
+            draw_replacement(fb, draw_x, y, glyph_width, glyph_height, color);
+        }
         draw_x += glyph_width;
     }
 }

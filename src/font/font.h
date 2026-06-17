@@ -5,9 +5,11 @@
 
 #include "gfx/gfx.h"
 
+#define FONT_BITMAP_BYTES 32
+
 typedef struct {
     uint32_t codepoint;
-    const uint8_t *bitmap;
+    uint8_t bitmap[FONT_BITMAP_BYTES];
 } font_glyph_t;
 
 typedef struct {
