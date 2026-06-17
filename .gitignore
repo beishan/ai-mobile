@@ -1,0 +1,5 @@
+.worktrees/
+build/
+out/
+reader_sim
+tests/test_runner
