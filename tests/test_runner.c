@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "gfx/gfx.h"
+#include "platform/sim_display.h"
 
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 #define ASSERT_EQ_INT(expected, actual) ASSERT_TRUE((expected) == (actual))
@@ -32,10 +34,33 @@ static void test_rectangles_clip_and_place_red_pixels(void) {
     ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 397, 297));
 }
 
+static void test_display_commit_writes_ppm_and_counts_refresh(void) {
+    gfx_framebuffer_t fb;
+    sim_display_t display;
+    char header[32] = {0};
+    FILE *file;
+
+    gfx_init(&fb);
+    gfx_clear(&fb, GFX_WHITE);
+    gfx_set_pixel(&fb, 0, 0, GFX_RED);
+    sim_display_init(&display, "out/test_frame.ppm");
+
+    ASSERT_EQ_INT(0, sim_display_refresh_count(&display));
+    ASSERT_EQ_INT(0, sim_display_commit(&display, &fb));
+    ASSERT_EQ_INT(1, sim_display_refresh_count(&display));
+
+    file = fopen("out/test_frame.ppm", "rb");
+    ASSERT_TRUE(file != NULL);
+    ASSERT_TRUE(fread(header, 1, 15, file) > 0);
+    fclose(file);
+    ASSERT_TRUE(strncmp(header, "P6\n400 300\n255\n", 15) == 0);
+}
+
 int main(void) {
     test_framebuffer_has_fixed_eink_size();
     test_set_pixel_clips_out_of_bounds();
     test_rectangles_clip_and_place_red_pixels();
+    test_display_commit_writes_ppm_and_counts_refresh();
     puts("tests passed");
     return 0;
 }
