@@ -3,6 +3,7 @@
 #include <string.h>
 #include "gfx/gfx.h"
 #include "platform/sim_display.h"
+#include "platform/sdl_display.h"
 #include "app/app_state.h"
 #include "ui/pages.h"
 #include "font/font.h"
@@ -161,6 +162,13 @@ static void test_snake_movement_changes_position(void) {
     ASSERT_TRUE(app.snake_y < y);
 }
 
+static void test_sdl_key_mapping_for_core_buttons(void) {
+    ASSERT_EQ_INT(APP_BUTTON_UP, sdl_display_button_from_key(SDLK_UP));
+    ASSERT_EQ_INT(APP_BUTTON_DOWN, sdl_display_button_from_key(SDLK_s));
+    ASSERT_EQ_INT(APP_BUTTON_HOME, sdl_display_button_from_key(SDLK_RETURN));
+    ASSERT_EQ_INT(APP_BUTTON_POWER, sdl_display_button_from_key(SDLK_BACKSPACE));
+}
+
 static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
     int count = 0;
     for (int y = 0; y < gfx_height(fb); y++) {
@@ -227,6 +235,7 @@ int main(void) {
     test_weather_refresh_changes_counter();
     test_english_flip_changes_state();
     test_snake_movement_changes_position();
+    test_sdl_key_mapping_for_core_buttons();
     test_home_render_uses_black_and_red();
     test_each_primary_page_renders_nonblank();
     puts("tests passed");
