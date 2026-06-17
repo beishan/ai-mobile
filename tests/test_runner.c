@@ -4,6 +4,7 @@
 #include "gfx/gfx.h"
 #include "platform/sim_display.h"
 #include "app/app_state.h"
+#include "ui/pages.h"
 
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 #define ASSERT_EQ_INT(expected, actual) ASSERT_TRUE((expected) == (actual))
@@ -97,6 +98,50 @@ static void test_settings_toggles_power_saving(void) {
     ASSERT_EQ_INT(0, app.power_saving_enabled);
 }
 
+static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
+    int count = 0;
+    for (int y = 0; y < gfx_height(fb); y++) {
+        for (int x = 0; x < gfx_width(fb); x++) {
+            if (gfx_get_pixel(fb, x, y) == color) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+static void test_home_render_uses_black_and_red(void) {
+    gfx_framebuffer_t fb;
+    app_state_t app;
+    gfx_init(&fb);
+    app_init(&app);
+    ui_render_page(&fb, &app);
+    ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 100);
+    ASSERT_TRUE(count_color(&fb, GFX_RED) > 100);
+}
+
+static void test_each_primary_page_renders_nonblank(void) {
+    gfx_framebuffer_t fb;
+    app_state_t app;
+    app_page_t pages[] = {
+        APP_PAGE_HOME,
+        APP_PAGE_BOOKSHELF,
+        APP_PAGE_READER,
+        APP_PAGE_WEATHER,
+        APP_PAGE_CALENDAR,
+        APP_PAGE_ENGLISH,
+        APP_PAGE_SETTINGS,
+        APP_PAGE_SNAKE
+    };
+    app_init(&app);
+    for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
+        gfx_init(&fb);
+        app.page = pages[i];
+        ui_render_page(&fb, &app);
+        ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 50);
+    }
+}
+
 int main(void) {
     test_framebuffer_has_fixed_eink_size();
     test_set_pixel_clips_out_of_bounds();
@@ -106,6 +151,8 @@ int main(void) {
     test_power_returns_function_page_to_home();
     test_reader_page_bounds();
     test_settings_toggles_power_saving();
+    test_home_render_uses_black_and_red();
+    test_each_primary_page_renders_nonblank();
     puts("tests passed");
     return 0;
 }
