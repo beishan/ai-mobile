@@ -2,8 +2,8 @@ CC ?= cc
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -I src
 
 TEST_BIN := tests/test_runner
-TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/sim_display.c src/app/app_state.c src/ui/pages.c
-SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/sim_display.c src/app/app_state.c src/ui/pages.c
+TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/sim_display.c src/app/app_state.c src/ui/pages.c src/font/font.c
+SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/sim_display.c src/app/app_state.c src/ui/pages.c src/font/font.c
 
 .PHONY: test clean
 

@@ -5,6 +5,7 @@
 #include "platform/sim_display.h"
 #include "app/app_state.h"
 #include "ui/pages.h"
+#include "font/font.h"
 
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 #define ASSERT_EQ_INT(expected, actual) ASSERT_TRUE((expected) == (actual))
@@ -98,6 +99,23 @@ static void test_settings_toggles_power_saving(void) {
     ASSERT_EQ_INT(0, app.power_saving_enabled);
 }
 
+static void test_utf8_decoder_reads_ascii_and_chinese(void) {
+    const unsigned char *p = (const unsigned char *)"A阅";
+    uint32_t cp = 0;
+    ASSERT_EQ_INT(1, font_decode_utf8(&p, &cp));
+    ASSERT_EQ_INT('A', (int)cp);
+    ASSERT_EQ_INT(1, font_decode_utf8(&p, &cp));
+    ASSERT_EQ_INT(0x9605, (int)cp);
+}
+
+static void test_utf8_decoder_replaces_invalid_bytes(void) {
+    const unsigned char bytes[] = {0xff, 0x00};
+    const unsigned char *p = bytes;
+    uint32_t cp = 0;
+    ASSERT_EQ_INT(1, font_decode_utf8(&p, &cp));
+    ASSERT_EQ_INT(0xfffd, (int)cp);
+}
+
 static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
     int count = 0;
     for (int y = 0; y < gfx_height(fb); y++) {
@@ -151,6 +169,8 @@ int main(void) {
     test_power_returns_function_page_to_home();
     test_reader_page_bounds();
     test_settings_toggles_power_saving();
+    test_utf8_decoder_reads_ascii_and_chinese();
+    test_utf8_decoder_replaces_invalid_bytes();
     test_home_render_uses_black_and_red();
     test_each_primary_page_renders_nonblank();
     puts("tests passed");
