@@ -6,6 +6,7 @@
 #include "platform/sdl_display.h"
 #include "app/app_state.h"
 #include "ui/pages.h"
+#include "ui/icons.h"
 #include "font/font.h"
 
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
@@ -169,6 +170,16 @@ static void test_sdl_key_mapping_for_core_buttons(void) {
     ASSERT_EQ_INT(APP_BUTTON_POWER, sdl_display_button_from_key(SDLK_BACKSPACE));
 }
 
+static void test_home_icons_draw_distinct_pixels(void) {
+    gfx_framebuffer_t fb;
+    gfx_init(&fb);
+    ui_draw_icon(&fb, UI_ICON_READER, 10, 10, 0);
+    ui_draw_icon(&fb, UI_ICON_WEATHER, 70, 10, 0);
+    ui_draw_icon(&fb, UI_ICON_CALENDAR, 130, 10, 0);
+    ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 100);
+    ASSERT_TRUE(count_color(&fb, GFX_RED) > 10);
+}
+
 static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
     int count = 0;
     for (int y = 0; y < gfx_height(fb); y++) {
@@ -236,6 +247,7 @@ int main(void) {
     test_english_flip_changes_state();
     test_snake_movement_changes_position();
     test_sdl_key_mapping_for_core_buttons();
+    test_home_icons_draw_distinct_pixels();
     test_home_render_uses_black_and_red();
     test_each_primary_page_renders_nonblank();
     puts("tests passed");

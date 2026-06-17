@@ -1,4 +1,5 @@
 #include "ui/pages.h"
+#include "ui/icons.h"
 
 #include <stdio.h>
 
@@ -17,20 +18,30 @@ static void label_box(gfx_framebuffer_t *fb, const font_t *font, int x, int y, i
         gfx_fill_rect(fb, x + 3, y + 3, w - 6, h - 6, GFX_WHITE);
     }
     gfx_draw_rect(fb, x, y, w, h, border);
-    font_draw_text(font, fb, x + 18, y + 20, label, GFX_BLACK);
+    font_draw_text(font, fb, x + 18, y + 62, label, GFX_BLACK);
 }
 
 static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
     const char *items[] = {"阅读", "天气", "日历", "游戏", "英语", "设置", "关于"};
+    const ui_icon_kind_t icons[] = {
+        UI_ICON_READER,
+        UI_ICON_WEATHER,
+        UI_ICON_CALENDAR,
+        UI_ICON_GAME,
+        UI_ICON_ENGLISH,
+        UI_ICON_SETTINGS,
+        UI_ICON_ABOUT
+    };
     const int xs[] = {20, 145, 270, 20, 145, 270, 145};
-    const int ys[] = {68, 68, 68, 158, 158, 158, 235};
+    const int ys[] = {58, 58, 58, 150, 150, 150, 232};
 
     title_bar(fb, font, "14:35", "WiFi 78%");
     font_draw_text(font, fb, 96, 34, "晴 26C 北京", GFX_BLACK);
     gfx_fill_rect(fb, 0, 24, GFX_WIDTH, 18, GFX_RED);
 
     for (int i = 0; i < 7; i++) {
-        label_box(fb, font, xs[i], ys[i], 105, 58, items[i], app->home_selection == i);
+        label_box(fb, font, xs[i], ys[i], 105, 74, items[i], app->home_selection == i);
+        ui_draw_icon(fb, icons[i], xs[i] + 28, ys[i] + 8, app->home_selection == i);
     }
 }
 

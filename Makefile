@@ -4,9 +4,9 @@ SDL_CFLAGS := $(shell sdl2-config --cflags)
 SDL_LIBS := $(shell sdl2-config --libs)
 
 TEST_BIN := tests/test_runner
-TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/sim_display.c src/platform/sdl_display.c src/app/app_state.c src/ui/pages.c src/font/font.c
-SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/sim_display.c src/app/app_state.c src/ui/pages.c src/font/font.c
-SDL_SIM_SRCS := src/main_sdl.c src/gfx/gfx.c src/platform/sdl_display.c src/app/app_state.c src/ui/pages.c src/font/font.c
+TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/sim_display.c src/platform/sdl_display.c src/app/app_state.c src/ui/pages.c src/ui/icons.c src/font/font.c
+SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/sim_display.c src/app/app_state.c src/ui/pages.c src/ui/icons.c src/font/font.c
+SDL_SIM_SRCS := src/main_sdl.c src/gfx/gfx.c src/platform/sdl_display.c src/app/app_state.c src/ui/pages.c src/ui/icons.c src/font/font.c
 
 .PHONY: test clean
 
