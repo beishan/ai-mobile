@@ -3,6 +3,7 @@
 #include <string.h>
 #include "gfx/gfx.h"
 #include "platform/sim_display.h"
+#include "app/app_state.h"
 
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 #define ASSERT_EQ_INT(expected, actual) ASSERT_TRUE((expected) == (actual))
@@ -56,11 +57,55 @@ static void test_display_commit_writes_ppm_and_counts_refresh(void) {
     ASSERT_TRUE(strncmp(header, "P6\n400 300\n255\n", 15) == 0);
 }
 
+static void test_home_selection_wraps_and_opens_weather(void) {
+    app_state_t app;
+    app_init(&app);
+    ASSERT_EQ_INT(APP_PAGE_HOME, app.page);
+    app_handle_button(&app, APP_BUTTON_DOWN);
+    ASSERT_EQ_INT(1, app.home_selection);
+    app_handle_button(&app, APP_BUTTON_HOME);
+    ASSERT_EQ_INT(APP_PAGE_WEATHER, app.page);
+}
+
+static void test_power_returns_function_page_to_home(void) {
+    app_state_t app;
+    app_init(&app);
+    app_handle_button(&app, APP_BUTTON_DOWN);
+    app_handle_button(&app, APP_BUTTON_HOME);
+    app_handle_button(&app, APP_BUTTON_POWER);
+    ASSERT_EQ_INT(APP_PAGE_HOME, app.page);
+}
+
+static void test_reader_page_bounds(void) {
+    app_state_t app;
+    app_init(&app);
+    app.page = APP_PAGE_READER;
+    app.reader_page = 0;
+    app_handle_button(&app, APP_BUTTON_UP);
+    ASSERT_EQ_INT(0, app.reader_page);
+    app_handle_button(&app, APP_BUTTON_DOWN);
+    ASSERT_EQ_INT(1, app.reader_page);
+}
+
+static void test_settings_toggles_power_saving(void) {
+    app_state_t app;
+    app_init(&app);
+    app.page = APP_PAGE_SETTINGS;
+    app.settings_selection = 5;
+    ASSERT_EQ_INT(1, app.power_saving_enabled);
+    app_handle_button(&app, APP_BUTTON_HOME);
+    ASSERT_EQ_INT(0, app.power_saving_enabled);
+}
+
 int main(void) {
     test_framebuffer_has_fixed_eink_size();
     test_set_pixel_clips_out_of_bounds();
     test_rectangles_clip_and_place_red_pixels();
     test_display_commit_writes_ppm_and_counts_refresh();
+    test_home_selection_wraps_and_opens_weather();
+    test_power_returns_function_page_to_home();
+    test_reader_page_bounds();
+    test_settings_toggles_power_saving();
     puts("tests passed");
     return 0;
 }
