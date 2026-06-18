@@ -191,32 +191,29 @@ tests passed
 - Home/app icon visual refinement.
 - Module depth beyond first-level simulated pages.
 - Game module depth beyond Snake preview/run loop.
-- Real ESP display driver still needs exact E-Ink controller model and refresh command/waveform sequence.
+- Real ESP display driver now has GPIO/SPI setup, controller primitives, and black/red 1bpp frame packing.
+- Real ESP input now polls POWER/UP/HOME/DOWN and routes events into the shared app state; each event re-renders and presents a frame.
+- Real ESP display driver still needs exact E-Ink controller model and refresh command/waveform sequence before physical refresh.
 
 ## Known Issues / Follow-Up
 
-- Current working tree changes are not fully committed.
 - Some icons are still code-drawn pixel approximations and can be refined further.
 - Reading, weather, calendar, English, settings, and games are still simulated with mock data.
 - Push-box and Sudoku are preview/list entries, not complete games yet.
-- Persistence, real SD card storage, WiFi, weather API, and ESP-IDF hardware work are deferred.
-- ESP firmware currently renders into the shared framebuffer and initializes GPIO/SPI; it has command/data primitives but does not yet physically refresh a panel.
+- Persistence, real SD card storage, WiFi, and weather API are still pending.
+- ESP firmware currently renders into the shared framebuffer, initializes GPIO/SPI, packs black/red frame planes, polls four hardware buttons, and exposes command/data primitives; it does not yet physically refresh a panel.
 
 ## Next Steps
 
 1. Confirm the E-Ink panel controller model and refresh command/waveform sequence.
-2. Replace `esp_display` logging adapter with SPI panel initialization and full refresh using the centralized pin map.
-3. Add ESP button GPIO input and route buttons into `app_handle_button`.
-4. Commit the current simulator + ESP skeleton work once git commit is available again.
-5. Continue module depth:
+2. Replace the current `esp_display` packed-frame logging with SPI panel initialization and full refresh using the centralized pin map.
+3. Add NVS persistence for settings, recent book, and reading positions.
+4. Continue module depth:
    - Reader persistence to SD/NVS after hardware/storage skeleton exists.
    - Weather detail layout.
    - Calendar memo persistence after storage skeleton exists.
    - English word library/settings persistence after storage skeleton exists.
    - More settings value editing and mock sub-pages.
-   - Push-box gameplay prototype.
-   - Sudoku board/input prototype.
-4. Start ESP-IDF/PlatformIO hardware skeleton after simulator behavior stabilizes.
 
 ## Useful Commands
 

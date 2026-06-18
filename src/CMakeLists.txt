@@ -6,7 +6,9 @@ idf_component_register(
         "ui/pages.c"
         "ui/icons.c"
         "font/font.c"
+        "platform/epd_frame.c"
         "platform/esp_display.c"
+        "platform/esp_input.c"
     INCLUDE_DIRS
         "."
         "../assets"

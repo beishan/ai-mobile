@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "platform/esp_board_config.h"
+#include "platform/epd_frame.h"
 
 static const char *TAG = "esp_display";
 
@@ -159,28 +160,43 @@ int esp_display_send_data(esp_display_t *display, const unsigned char *data, int
 }
 
 int esp_display_present(esp_display_t *display, const gfx_framebuffer_t *fb) {
+    static epd_frame_t frame;
     int black = 0;
     int red = 0;
+    unsigned int black_checksum = 0;
+    unsigned int red_checksum = 0;
     if (display == NULL || fb == NULL) {
         return -1;
     }
 
-    for (int y = 0; y < gfx_height(fb); y++) {
-        for (int x = 0; x < gfx_width(fb); x++) {
-            gfx_color_t pixel = gfx_get_pixel(fb, x, y);
-            if (pixel == GFX_BLACK) {
+    if (epd_frame_pack(fb, &frame) != 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < EPD_FRAME_BYTES; i++) {
+        unsigned char black_byte = frame.black[i];
+        unsigned char red_byte = frame.red[i];
+        black_checksum = (black_checksum * 33u) ^ black_byte;
+        red_checksum = (red_checksum * 33u) ^ red_byte;
+        for (int bit = 0; bit < 8; bit++) {
+            unsigned char mask = (unsigned char)(0x80u >> bit);
+            if ((black_byte & mask) == 0) {
                 black++;
-            } else if (pixel == GFX_RED) {
+            }
+            if ((red_byte & mask) == 0) {
                 red++;
             }
         }
     }
 
     display->refresh_count++;
-    ESP_LOGI(TAG, "present frame %d: black=%d red=%d hardware_ready=%d",
+    ESP_LOGI(TAG, "present frame %d: bytes=%d black=%d red=%d black_sum=%08x red_sum=%08x hardware_ready=%d",
              display->refresh_count,
+             EPD_FRAME_BYTES,
              black,
              red,
+             black_checksum,
+             red_checksum,
              display->hardware_ready);
     return 0;
 }

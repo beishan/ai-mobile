@@ -248,7 +248,7 @@ monitor_speed = 115200
 monitor_filters = esp32_exception_decoder
 ```
 
-当前真机开发阶段已新增 PlatformIO + ESP-IDF 工程骨架：`app_main` 会初始化共享 UI 状态、400×300 framebuffer 和内置点阵字体，并渲染首帧到 ESP 显示适配层。`esp_display` 当前为安全占位实现，会在串口日志中输出黑/红像素统计；具体墨水屏 SPI 控制器、引脚、复位/忙线时序和刷屏波形待硬件信息确认后接入。
+当前真机开发阶段已新增 PlatformIO + ESP-IDF 工程骨架：`app_main` 会初始化共享 UI 状态、400×300 framebuffer 和内置点阵字体，并渲染首帧到 ESP 显示适配层。`platform/epd_frame` 会把 framebuffer 打包为黑/红两个 15,000 字节的 1bpp 平面；`esp_display` 当前会初始化 GPIO/SPI、提供 reset/busy/command/data 原语，并在串口日志中输出打包字节数、黑/红像素统计和校验值。`esp_input` 会轮询 POWER/UP/HOME/DOWN 四个低电平触发按键，并把事件送入共享 `app_handle_button` 状态机，触发重绘和刷新。具体墨水屏 SPI 控制器、复位/忙线时序和刷屏波形待硬件信息确认后接入。
 
 ### 3.3 分区表（partitions_16mb.csv）
 

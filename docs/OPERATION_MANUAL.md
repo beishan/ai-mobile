@@ -37,10 +37,21 @@ file first if the hardware wiring changes, then update this table and
 | GND | GND |
 | VCC | 3V |
 
+Button wiring:
+
+| Button | ESP32 pin | Note |
+|--------|-----------|------|
+| POWER | GPIO0 | Internal pull-up |
+| UP | GPIO35 | External 10k pull-up to 3.3V |
+| HOME | GPIO34 | External 10k pull-up to 3.3V |
+| DOWN | GPIO39 | External 10k pull-up to 3.3V |
+
 Current firmware status:
 
 - `app_main` renders the shared UI into the 400 x 300 framebuffer.
 - `esp_display` configures CS/DC/RST as outputs, BUSY as input, and initializes the SPI bus on SCK/SDA.
 - `esp_display` provides reset, busy wait, command send, and data send primitives.
-- Frame presentation logs framebuffer black/red pixel counts until the exact controller init/refresh sequence is added.
+- `platform/epd_frame` packs each rendered frame into 15,000-byte black and red 1bpp planes.
+- `esp_input` polls POWER/UP/HOME/DOWN and routes button events into `app_handle_button`; each event re-renders and presents a new frame.
+- Frame presentation logs packed byte counts, black/red pixel counts, and checksums until the exact controller init/refresh sequence is added.
 - Physical panel refresh still needs the exact E-Ink controller command sequence.

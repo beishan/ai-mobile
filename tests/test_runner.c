@@ -8,6 +8,7 @@
 #include "ui/pages.h"
 #include "ui/icons.h"
 #include "font/font.h"
+#include "platform/epd_frame.h"
 
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 #define ASSERT_EQ_INT(expected, actual) ASSERT_TRUE((expected) == (actual))
@@ -113,6 +114,63 @@ static void test_esp_display_has_controller_primitives(void) {
     ASSERT_TRUE(file_contains("src/platform/esp_display.c", "vTaskDelay(pdMS_TO_TICKS"));
     ASSERT_TRUE(file_contains("src/platform/esp_display.c", "spi_device_transmit"));
     ASSERT_TRUE(file_contains("src/platform/esp_display.c", "ESP_EPD_BUSY_TIMEOUT_MS"));
+}
+
+static void test_esp_button_wiring_is_centralized_and_documented(void) {
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "#define ESP_BUTTON_PIN_POWER 0"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "#define ESP_BUTTON_PIN_UP 35"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "#define ESP_BUTTON_PIN_HOME 34"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "#define ESP_BUTTON_PIN_DOWN 39"));
+    ASSERT_TRUE(file_contains("README.md", "POWER | GPIO0"));
+    ASSERT_TRUE(file_contains("docs/OPERATION_MANUAL.md", "POWER | GPIO0"));
+}
+
+static void test_esp_input_routes_gpio_buttons_to_app_buttons(void) {
+    ASSERT_TRUE(file_contains("src/platform/esp_input.h", "esp_input_poll_button"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "APP_BUTTON_POWER"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "APP_BUTTON_UP"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "APP_BUTTON_HOME"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "APP_BUTTON_DOWN"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "gpio_get_level"));
+    ASSERT_TRUE(file_contains("src/CMakeLists.txt", "platform/esp_input.c"));
+}
+
+static void test_esp_main_rerenders_after_button_events(void) {
+    ASSERT_TRUE(file_contains("src/main_esp.c", "esp_input_init"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "esp_input_poll_button"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "app_handle_button"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "ui_render_page"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "esp_display_present"));
+}
+
+static void test_epd_frame_pack_uses_white_one_black_zero_planes(void) {
+    gfx_framebuffer_t fb;
+    epd_frame_t frame;
+
+    gfx_init(&fb);
+    gfx_clear(&fb, GFX_WHITE);
+    gfx_set_pixel(&fb, 0, 0, GFX_BLACK);
+    gfx_set_pixel(&fb, 1, 0, GFX_RED);
+    gfx_set_pixel(&fb, 7, 0, GFX_BLACK);
+    gfx_set_pixel(&fb, 8, 0, GFX_RED);
+
+    memset(&frame, 0, sizeof(frame));
+    ASSERT_EQ_INT(0, epd_frame_pack(&fb, &frame));
+    ASSERT_EQ_INT(EPD_FRAME_BYTES, (int)sizeof(frame.black));
+    ASSERT_EQ_INT(EPD_FRAME_BYTES, (int)sizeof(frame.red));
+    ASSERT_EQ_INT(0x7e, frame.black[0]);
+    ASSERT_EQ_INT(0xff, frame.black[1]);
+    ASSERT_EQ_INT(0xbf, frame.red[0]);
+    ASSERT_EQ_INT(0x7f, frame.red[1]);
+}
+
+static void test_epd_frame_pack_rejects_null_inputs(void) {
+    gfx_framebuffer_t fb;
+    epd_frame_t frame;
+
+    gfx_init(&fb);
+    ASSERT_EQ_INT(-1, epd_frame_pack(NULL, &frame));
+    ASSERT_EQ_INT(-1, epd_frame_pack(&fb, NULL));
 }
 
 static void test_home_selection_wraps_and_opens_weather(void) {
@@ -825,6 +883,11 @@ int main(void) {
     test_esp_epd_wiring_is_centralized_and_documented();
     test_esp_display_initializes_gpio_and_spi_bus();
     test_esp_display_has_controller_primitives();
+    test_esp_button_wiring_is_centralized_and_documented();
+    test_esp_input_routes_gpio_buttons_to_app_buttons();
+    test_esp_main_rerenders_after_button_events();
+    test_epd_frame_pack_uses_white_one_black_zero_planes();
+    test_epd_frame_pack_rejects_null_inputs();
     test_home_selection_wraps_and_opens_weather();
     test_power_returns_function_page_to_home();
     test_reader_page_bounds();

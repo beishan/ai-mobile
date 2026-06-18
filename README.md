@@ -136,7 +136,9 @@ Current hardware status:
 - The wiring is centralized in `src/platform/esp_board_config.h`.
 - `src/platform/esp_display.c` configures the E-Ink GPIO pins and SPI bus using that wiring map.
 - `esp_display` now provides reset, busy wait, command send, and data send primitives.
-- Frame presentation still logs black/red pixel counts until the exact controller init/refresh sequence is added.
+- `platform/epd_frame` packs the shared framebuffer into 15,000-byte black and red 1bpp planes.
+- `src/platform/esp_input.c` polls the four active-low hardware buttons and routes them to the shared app state.
+- Frame presentation logs packed byte counts, black/red pixel counts, and checksums until the exact controller init/refresh sequence is added.
 - The exact E-Ink SPI controller, reset/busy timing, and LUT/waveform sequence still need to be filled in before it can physically refresh the panel.
 
 Current E-Ink wiring:
@@ -151,6 +153,15 @@ Current E-Ink wiring:
 | SDA | GPIO23 |
 | GND | GND |
 | VCC | 3V |
+
+Current button wiring:
+
+| Button | ESP32 pin | Note |
+|--------|-----------|------|
+| POWER | GPIO0 | Internal pull-up |
+| UP | GPIO35 | External 10k pull-up to 3.3V |
+| HOME | GPIO34 | External 10k pull-up to 3.3V |
+| DOWN | GPIO39 | External 10k pull-up to 3.3V |
 
 ## Snapshots
 
