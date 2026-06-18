@@ -20,20 +20,50 @@ typedef enum {
     APP_BUTTON_DOWN
 } app_button_t;
 
+#define APP_BOOK_COUNT 3
+#define APP_ENGLISH_WORD_COUNT 3
+
 typedef struct {
     app_page_t page;
     int home_selection;
     int bookshelf_selection;
+    int current_book;
+    int recent_book;
+    int book_pages[APP_BOOK_COUNT];
+    int book_current_pages[APP_BOOK_COUNT];
+    int book_bookmark_pages[APP_BOOK_COUNT];
     int reader_page;
+    int reader_menu_open;
+    int reader_menu_selection;
+    int reader_catalog_open;
+    int reader_catalog_selection;
+    int bookmark_added;
     int weather_refreshes;
+    int weather_city_index;
+    int weather_stale;
+    int weather_last_updated_minutes;
     int calendar_month_offset;
+    int calendar_selected_day;
+    int calendar_detail_open;
     int english_word;
     int english_show_back;
+    int english_known_count;
+    int english_review_count;
+    int english_answer_state[APP_ENGLISH_WORD_COUNT];
     int settings_selection;
+    int font_size_index;
+    int line_spacing_index;
+    int wifi_connected;
     int power_saving_enabled;
+    int game_selection;
     int snake_x;
     int snake_y;
     int snake_score;
+    int snake_running;
+    int snake_direction;
+    int snake_food_x;
+    int snake_food_y;
+    int snake_game_over;
 } app_state_t;
 
 void app_init(app_state_t *app);

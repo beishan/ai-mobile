@@ -8,6 +8,18 @@
 
 **Tech Stack:** C11, Make, standard C library, repository-contained bitmap font data, Python 3 + Pillow only for regenerating font assets.
 
+## Current Implementation Status - 2026-06-17 18:12
+
+- Chinese UI rendering is implemented with repository-contained bitmap font assets.
+- Font system now includes multiple sizes and role-based layout helpers from the later font/layout pass.
+- All primary pages render Chinese text with mock data.
+- Home page has been updated from the early 3-column/frame style to a 4-column image-icon grid with clear labels.
+- Status bar now places weather after time and uses signal/battery icons instead of clipped text.
+- Reader page uses wrapped 20 px Chinese text and intentionally leaves the bottom area blank.
+- Reader bottom operation hint text and bottom progress bar are removed.
+- Reader menu has selectable rows, add-bookmark feedback (`已加书签`), and exit-to-bookshelf behavior.
+- Snapshot capture now writes timestamped sets under `snapshots/` and includes reader body/menu pages.
+
 ## Global Constraints
 
 - Chinese display is mandatory.
@@ -302,7 +314,7 @@ Expected: if current behavior already passes, add render-state assertions for Ch
 
 - [ ] **Step 3: Update page content**
 
-Replace all visible English strings in page renderers with Chinese text from the design spec. Use Chinese book data, Chinese weather data, Chinese settings labels, Chinese reader paragraphs, and Chinese operation hints. Keep red usage limited to semantic highlights.
+Replace all visible English strings in page renderers with Chinese text from the design spec. Use Chinese book data, Chinese weather data, Chinese settings labels, Chinese reader paragraphs, and necessary Chinese hints on non-reader pages. Keep the normal reader page bottom blank with no operation hint or progress bar. Keep red usage limited to semantic highlights.
 
 - [ ] **Step 4: Run green test**
 

@@ -8,6 +8,24 @@
 
 **Tech Stack:** C11, Make, SDL2 2.32.10, repository-contained bitmap font/icon data.
 
+## Current Implementation Status - 2026-06-17 18:12
+
+- `reader_sim_sdl` is implemented and verified with dummy-video smoke mode.
+- Home page icons are drawn as distinguishable three-color pixel icons with no outer tile frames.
+- Home layout is currently 4 columns and supports future multi-screen expansion.
+- Status bar has compact Chinese/number text, weather after time, signal-style WiFi icon, and complete battery display.
+- Reader page now keeps page count in the title bar and removes the bottom hint/progress area.
+- Reader menu supports selectable actions, bookmark feedback, POWER cancel, and exit to bookshelf.
+- Snapshot workflow captures timestamped visual sets including `reader.png` and `reader_menu.png`.
+
+## Current Implementation Status - 2026-06-18 10:49
+
+- Snapshot workflow now stores all generated PNGs in timestamped folders and includes running/game-over Snake states.
+- Reader, weather, calendar, English, settings, and game pages use generated Chinese bitmap font assets.
+- Game module now has a split list/running/game-over state flow for Snake.
+- Snake runs as an E-Ink-friendly step game: UP/DOWN changes vertical direction and moves once, HOME advances once, red food adds score, and wall collision ends the run.
+- Push-box and Sudoku remain selectable preview rows for later deeper implementation.
+
 ## Global Constraints
 
 - `reader_sim_sdl` is the primary SDL2 simulator executable.
@@ -33,11 +51,11 @@
 - Consumes: `gfx_framebuffer_t`, `app_button_t`
 
 Steps:
-- [ ] Add a failing compile test by referencing `sdl_display.h` from tests.
-- [ ] Run `make test`; expect compile failure.
-- [ ] Implement SDL2 display and event mapping.
-- [ ] Add `reader_sim_sdl` target using `sdl2-config --cflags --libs`.
-- [ ] Run `make test`, `make reader_sim_sdl`, and `SDL_VIDEODRIVER=dummy ./reader_sim_sdl --smoke`.
+- [x] Add a failing compile test by referencing `sdl_display.h` from tests.
+- [x] Run `make test`; expect compile failure.
+- [x] Implement SDL2 display and event mapping.
+- [x] Add `reader_sim_sdl` target using `sdl2-config --cflags --libs`.
+- [x] Run `make test`, `make reader_sim_sdl`, and `SDL_VIDEODRIVER=dummy ./reader_sim_sdl --smoke`.
 - [ ] Commit with `feat: add sdl2 simulator window`.
 
 ### Task 2: Pixel Icons
@@ -54,11 +72,11 @@ Steps:
 - Consumes: `gfx_fill_rect`, `gfx_draw_rect`
 
 Steps:
-- [ ] Add tests that each icon draws black pixels and at least one icon draws red accent pixels.
-- [ ] Run `make test`; expect compile failure because `ui/icons.h` is missing.
-- [ ] Implement seven 48 x 48 icon drawing routines: reading, weather, calendar, games, English, settings, about.
-- [ ] Use icons on the home screen above Chinese labels.
-- [ ] Run `make test`.
+- [x] Add tests that each icon draws black pixels and at least one icon draws red accent pixels.
+- [x] Run `make test`; expect compile failure because `ui/icons.h` is missing.
+- [x] Implement seven 48 x 48 icon drawing routines: reading, weather, calendar, games, English, settings, about.
+- [x] Use icons on the home screen above Chinese labels.
+- [x] Run `make test`.
 - [ ] Commit with `feat: add home pixel app icons`.
 
 ### Task 3: Richer Module Details
@@ -74,11 +92,11 @@ Steps:
 - Produces: richer app states for reader menu, settings values, game list previews, and module details.
 
 Steps:
-- [ ] Add tests for opening every home module, settings value cycling, calendar month switching, reader menu toggle, and snake movement.
-- [ ] Run `make test`; expect any missing behavior to fail.
-- [ ] Implement missing state fields and button handling.
-- [ ] Render reader menu, game list previews, richer about/settings/weather details.
-- [ ] Run `make test`.
+- [x] Add tests for opening every home module, settings value cycling, calendar month switching, reader menu toggle, and snake movement.
+- [x] Run `make test`; expect any missing behavior to fail.
+- [x] Implement missing state fields and button handling.
+- [x] Render reader menu, game list previews, richer about/settings/weather details.
+- [x] Run `make test`.
 - [ ] Commit with `feat: enrich simulator app modules`.
 
 ### Task 4: Docs and Verification
@@ -87,7 +105,7 @@ Steps:
 - Modify: `README.md`
 
 Steps:
-- [ ] Document `make reader_sim_sdl`, SDL2 controls, smoke command, and icon behavior.
+- [x] Document `make reader_sim_sdl`, SDL2 controls, smoke command, and icon behavior.
 - [ ] Run `make clean`, `make test`, `make reader_sim`, `make reader_sim_sdl`, `SDL_VIDEODRIVER=dummy ./reader_sim_sdl --smoke`.
 - [ ] Commit with `docs: document sdl2 simulator`.
 - [ ] Push branch.

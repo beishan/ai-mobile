@@ -1,0 +1,18 @@
+idf_component_register(
+    SRCS
+        "main_esp.c"
+        "gfx/gfx.c"
+        "app/app_state.c"
+        "ui/pages.c"
+        "ui/icons.c"
+        "font/font.c"
+        "platform/esp_display.c"
+    INCLUDE_DIRS
+        "."
+        "../assets"
+    REQUIRES
+        esp_driver_gpio
+        esp_driver_spi
+        freertos
+        log
+)

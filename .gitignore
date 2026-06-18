@@ -1,5 +1,11 @@
 .worktrees/
+.DS_Store
+.vscode/
 build/
 out/
+.pio/
+sdkconfig.*
+!sdkconfig.defaults
 reader_sim
+reader_sim_sdl
 tests/test_runner

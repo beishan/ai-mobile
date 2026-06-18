@@ -8,6 +8,17 @@
 
 **Tech Stack:** C11, Make, standard C library, PPM image output, no external runtime dependencies.
 
+## Current Implementation Status - 2026-06-17 18:12
+
+- Implemented `reader_sim` PPM simulator, portable framebuffer, app state, page rendering, and tests.
+- Later work upgraded text rendering to repository-contained Chinese bitmap fonts and multi-size layout helpers.
+- Home page currently uses a 4-column icon grid, signal-style WiFi icon, battery icon plus percentage, weather in the status bar, and no tile frames.
+- Reader page currently shows wrapped 20 px Chinese body text and top-bar page count only.
+- Reader bottom operation hint text and bottom progress bar have been removed by requirement.
+- Reader menu currently supports `继续阅读 / 查看目录 / 添加书签 / 退出到书架`; POWER closes the menu without leaving reading.
+- Visual snapshots are captured into timestamped folders under `snapshots/`, including `reader.png` and `reader_menu.png`.
+- Latest tracked snapshot set at time of this update: `snapshots/20260617-181219-reader-bottom-clean/`.
+
 ## Global Constraints
 
 - Display size is exactly 400 x 300 pixels.

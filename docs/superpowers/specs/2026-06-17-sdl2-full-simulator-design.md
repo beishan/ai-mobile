@@ -28,8 +28,8 @@ The existing PPM simulator remains as a deterministic output path for tests and 
 
 ## Module Scope
 
-- Home: status bar, weather summary, WiFi/battery text, seven app icons, red selected state.
-- Reader: bookshelf, open book, Chinese reader pages, progress bar, previous/next page, simple reader menu.
+- Home: status bar with time/weather, signal-style WiFi icon, battery icon plus percentage, seven app icons in a four-column grid, red selected state.
+- Reader: bookshelf, open book, Chinese reader pages, top-bar page count, previous/next page, selectable reader menu. The normal reading page bottom is blank and does not show operation hints or a bottom progress bar.
 - Weather: Beijing mock weather, manual refresh count, three-day forecast, air quality.
 - Calendar: current month grid, today marker, weekend red text, lunar summary, month switching.
 - Games: game list plus playable snake; push-box and sudoku preview entries with progress/status.
@@ -69,6 +69,13 @@ The SDL2 window shows an E-Ink-like off-white background with black and red pixe
 
 Icons use black as the main shape and red for accents such as bookmark, sun, selected date, joystick button, or information dot.
 
+Reader visual rules:
+
+- Body text uses wrapped 20 px Chinese font.
+- Page count stays in the top title bar.
+- Bottom operation hint text and bottom progress bar are not rendered.
+- Reader menu uses a white panel, red top accent, and inverse red highlight for the selected row.
+
 ## Testing
 
 Automated tests continue through `make test` and do not require a visible SDL window. They cover:
@@ -93,3 +100,4 @@ SDL2 is verified by:
 - Keyboard input navigates home and opens every module.
 - Each module renders meaningful Chinese content and at least one useful interaction.
 - README documents SDL2 build/run commands.
+- Timestamped snapshot capture includes both `reader.png` and `reader_menu.png`.

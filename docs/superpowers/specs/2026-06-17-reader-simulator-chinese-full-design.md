@@ -67,8 +67,10 @@ Later firmware can replace the file-backed loader with SPIFFS or compiled binary
 The current page renderers will be converted from English labels to Chinese layouts:
 
 - Home: status bar with `14:35`, `晴 26°C 北京`, `WiFi`, and `78%`; grid labels `阅读 / 天气 / 日历 / 游戏 / 英语 / 设置 / 关于`.
+- Home implementation baseline: status bar uses compact 12 px text, weather appears after time, WiFi is represented by a signal-style icon, battery uses icon plus complete percentage, and the app grid is four columns with image-like pixel icons and no outer tile frames.
 - Bookshelf: Chinese titles such as `三体`, `百年孤独`, `活着`; author, size, and progress.
-- Reader: Chinese title/chapter bar and real sample Chinese paragraphs with page progress.
+- Reader: Chinese title/chapter bar and real sample Chinese paragraphs. Page progress is shown in the top title bar only; the page bottom stays blank with no operation hint line and no bottom progress bar.
+- Reader menu: HOME opens a four-item menu (`继续阅读 / 查看目录 / 添加书签 / 退出到书架`), UP/DOWN move selection, HOME executes, POWER closes the menu without leaving the reader. After adding a bookmark, the item text becomes `已加书签`.
 - Weather: `北京`, `26°C`, `晴转多云`, humidity/wind, three-day forecast, and air quality.
 - Calendar: `2025年6月`, weekday headers, today marker, weekend red text, and lunar summary.
 - English: Chinese module labels with English word, phonetic text, Chinese meaning, and example sentence.
@@ -86,6 +88,8 @@ This phase makes the simulator feel like a usable device:
 - Power returns from modules to home.
 - Bookshelf selection opens the reader.
 - Reader supports previous/next page and progress updates.
+- Reader HOME opens a selectable menu; menu exit returns to bookshelf.
+- Reader bare POWER does not exit reading; POWER only closes the reader menu when it is open.
 - Weather supports a manual mock refresh.
 - Calendar supports previous/next month offset.
 - English card flips between front and back, and moves through sample words.
@@ -131,6 +135,7 @@ Tests should cover:
 - Settings toggle changes value.
 - Snake movement changes board position.
 - PPM output still writes a valid frame.
+- Reader bottom hint/progress area remains blank in normal reading mode.
 
 The project continues to use `make test` as the single verification command.
 
@@ -146,6 +151,7 @@ The phase is complete when:
 - Main interactions listed in this spec work through `w`, `s`, `h`/Enter, and `p`.
 - Font assets required for Chinese rendering are tracked in the repository.
 - README documents the Chinese simulator and frame inspection flow.
+- Visual snapshots are stored in timestamped folders under `snapshots/`, including reader body and reader menu screenshots.
 
 ## Deferred Decisions
 
