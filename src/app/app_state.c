@@ -3,10 +3,14 @@
 #include <stddef.h>
 
 #define HOME_ITEM_COUNT 7
-#define BOOK_COUNT 3
-#define READER_PAGE_COUNT 5
-#define ENGLISH_WORD_COUNT 3
+#define READER_MENU_COUNT 4
+#define READER_CATALOG_COUNT 3
+#define WEATHER_CITY_COUNT 3
+#define CALENDAR_DAYS_IN_MONTH 30
 #define SETTINGS_COUNT 6
+#define GAME_COUNT 3
+#define SNAKE_BOARD_COLS 36
+#define SNAKE_BOARD_ROWS 10
 
 static app_page_t page_for_home_selection(int selection) {
     switch (selection) {
@@ -38,6 +42,92 @@ static int wrap_index(int value, int count) {
     return value;
 }
 
+static int clamp_page(int page, int total) {
+    if (page < 0) {
+        return 0;
+    }
+    if (page >= total) {
+        return total - 1;
+    }
+    return page;
+}
+
+static int chapter_page_for_selection(const app_state_t *app, int selection) {
+    int total = app->book_pages[app->current_book];
+    int page = selection * 2;
+    return clamp_page(page, total);
+}
+
+static void sync_reader_page(app_state_t *app) {
+    int total = app->book_pages[app->current_book];
+    app->reader_page = clamp_page(app->reader_page, total);
+    app->book_current_pages[app->current_book] = app->reader_page;
+}
+
+static void record_english_answer(app_state_t *app, int known) {
+    int word = app->english_word;
+    int previous = app->english_answer_state[word];
+    if (previous == 1) {
+        app->english_known_count--;
+    } else if (previous == 2) {
+        app->english_review_count--;
+    }
+    app->english_answer_state[word] = known ? 1 : 2;
+    if (known) {
+        app->english_known_count++;
+    } else {
+        app->english_review_count++;
+    }
+    app->english_word = wrap_index(app->english_word + 1, APP_ENGLISH_WORD_COUNT);
+    app->english_show_back = 0;
+}
+
+static void snake_reset(app_state_t *app) {
+    app->snake_x = 4;
+    app->snake_y = 5;
+    app->snake_score = 0;
+    app->snake_running = 1;
+    app->snake_direction = 0;
+    app->snake_food_x = 28;
+    app->snake_food_y = 5;
+    app->snake_game_over = 0;
+}
+
+static void snake_place_next_food(app_state_t *app) {
+    app->snake_food_x = (app->snake_food_x + 7) % SNAKE_BOARD_COLS;
+    app->snake_food_y = (app->snake_food_y + 3) % SNAKE_BOARD_ROWS;
+    if (app->snake_food_x == app->snake_x && app->snake_food_y == app->snake_y) {
+        app->snake_food_x = (app->snake_food_x + 5) % SNAKE_BOARD_COLS;
+    }
+}
+
+static void snake_step(app_state_t *app) {
+    int next_x = app->snake_x;
+    int next_y = app->snake_y;
+    if (app->snake_direction == 0) {
+        next_x++;
+    } else if (app->snake_direction == 1) {
+        next_y++;
+    } else if (app->snake_direction == 2) {
+        next_x--;
+    } else {
+        next_y--;
+    }
+
+    if (next_x < 0 || next_x >= SNAKE_BOARD_COLS || next_y < 0 || next_y >= SNAKE_BOARD_ROWS) {
+        app->snake_running = 0;
+        app->snake_game_over = 1;
+        return;
+    }
+
+    app->snake_x = next_x;
+    app->snake_y = next_y;
+    if (app->snake_x == app->snake_food_x && app->snake_y == app->snake_food_y) {
+        app->snake_score += 10;
+        snake_place_next_food(app);
+    }
+}
+
 void app_init(app_state_t *app) {
     if (app == NULL) {
         return;
@@ -46,16 +136,49 @@ void app_init(app_state_t *app) {
     app->page = APP_PAGE_HOME;
     app->home_selection = 0;
     app->bookshelf_selection = 0;
+    app->current_book = 0;
+    app->recent_book = -1;
+    app->book_pages[0] = 5;
+    app->book_pages[1] = 4;
+    app->book_pages[2] = 3;
+    for (int i = 0; i < APP_BOOK_COUNT; i++) {
+        app->book_current_pages[i] = 0;
+        app->book_bookmark_pages[i] = -1;
+    }
     app->reader_page = 0;
+    app->reader_menu_open = 0;
+    app->reader_menu_selection = 0;
+    app->reader_catalog_open = 0;
+    app->reader_catalog_selection = 0;
+    app->bookmark_added = 0;
     app->weather_refreshes = 0;
+    app->weather_city_index = 0;
+    app->weather_stale = 0;
+    app->weather_last_updated_minutes = 15;
     app->calendar_month_offset = 0;
+    app->calendar_selected_day = 15;
+    app->calendar_detail_open = 0;
     app->english_word = 0;
     app->english_show_back = 0;
+    app->english_known_count = 0;
+    app->english_review_count = 0;
+    for (int i = 0; i < APP_ENGLISH_WORD_COUNT; i++) {
+        app->english_answer_state[i] = 0;
+    }
     app->settings_selection = 0;
+    app->font_size_index = 2;
+    app->line_spacing_index = 2;
+    app->wifi_connected = 1;
     app->power_saving_enabled = 1;
-    app->snake_x = 20;
-    app->snake_y = 13;
-    app->snake_score = 12;
+    app->game_selection = 0;
+    app->snake_x = 4;
+    app->snake_y = 5;
+    app->snake_score = 0;
+    app->snake_running = 0;
+    app->snake_direction = 0;
+    app->snake_food_x = 28;
+    app->snake_food_y = 5;
+    app->snake_game_over = 0;
 }
 
 static void handle_home(app_state_t *app, app_button_t button) {
@@ -70,45 +193,130 @@ static void handle_home(app_state_t *app, app_button_t button) {
 
 static void handle_bookshelf(app_state_t *app, app_button_t button) {
     if (button == APP_BUTTON_UP) {
-        app->bookshelf_selection = wrap_index(app->bookshelf_selection - 1, BOOK_COUNT);
+        app->bookshelf_selection = wrap_index(app->bookshelf_selection - 1, APP_BOOK_COUNT);
     } else if (button == APP_BUTTON_DOWN) {
-        app->bookshelf_selection = wrap_index(app->bookshelf_selection + 1, BOOK_COUNT);
+        app->bookshelf_selection = wrap_index(app->bookshelf_selection + 1, APP_BOOK_COUNT);
     } else if (button == APP_BUTTON_HOME) {
+        app->current_book = app->bookshelf_selection;
+        app->recent_book = app->current_book;
         app->page = APP_PAGE_READER;
-        app->reader_page = 0;
+        app->reader_page = app->book_current_pages[app->current_book];
+        app->reader_menu_open = 0;
+        app->reader_menu_selection = 0;
+        app->reader_catalog_open = 0;
+        app->reader_catalog_selection = 0;
     }
 }
 
 static void handle_reader(app_state_t *app, app_button_t button) {
-    if (button == APP_BUTTON_UP && app->reader_page > 0) {
+    if (app->reader_menu_open) {
+        if (app->reader_catalog_open) {
+            if (button == APP_BUTTON_UP) {
+                app->reader_catalog_selection = wrap_index(app->reader_catalog_selection - 1, READER_CATALOG_COUNT);
+            } else if (button == APP_BUTTON_DOWN) {
+                app->reader_catalog_selection = wrap_index(app->reader_catalog_selection + 1, READER_CATALOG_COUNT);
+            } else if (button == APP_BUTTON_POWER) {
+                app->reader_catalog_open = 0;
+            } else if (button == APP_BUTTON_HOME) {
+                app->reader_page = chapter_page_for_selection(app, app->reader_catalog_selection);
+                sync_reader_page(app);
+                app->reader_catalog_open = 0;
+                app->reader_menu_open = 0;
+            }
+            return;
+        } else if (button == APP_BUTTON_UP) {
+            app->reader_menu_selection = wrap_index(app->reader_menu_selection - 1, READER_MENU_COUNT);
+        } else if (button == APP_BUTTON_DOWN) {
+            app->reader_menu_selection = wrap_index(app->reader_menu_selection + 1, READER_MENU_COUNT);
+        } else if (button == APP_BUTTON_POWER) {
+            app->reader_menu_open = 0;
+        } else if (button == APP_BUTTON_HOME) {
+            if (app->reader_menu_selection == 1) {
+                app->reader_catalog_open = 1;
+                app->reader_catalog_selection = 0;
+            } else if (app->reader_menu_selection == 2) {
+                app->book_bookmark_pages[app->current_book] = app->reader_page;
+                app->bookmark_added = 1;
+                app->reader_menu_open = 0;
+            } else if (app->reader_menu_selection == 3) {
+                app->reader_menu_open = 0;
+                app->reader_catalog_open = 0;
+                app->page = APP_PAGE_BOOKSHELF;
+            } else {
+                app->reader_menu_open = 0;
+            }
+        }
+        return;
+    }
+
+    if (button == APP_BUTTON_POWER) {
+        return;
+    } else if (button == APP_BUTTON_UP && app->reader_page > 0) {
         app->reader_page--;
-    } else if (button == APP_BUTTON_DOWN && app->reader_page < READER_PAGE_COUNT - 1) {
+        sync_reader_page(app);
+    } else if (button == APP_BUTTON_DOWN && app->reader_page < app->book_pages[app->current_book] - 1) {
         app->reader_page++;
+        sync_reader_page(app);
     } else if (button == APP_BUTTON_HOME) {
-        app->page = APP_PAGE_BOOKSHELF;
+        app->reader_menu_open = 1;
+        app->reader_menu_selection = 0;
+        app->reader_catalog_open = 0;
     }
 }
 
 static void handle_secondary_page(app_state_t *app, app_button_t button) {
     switch (app->page) {
         case APP_PAGE_WEATHER:
-            if (button == APP_BUTTON_HOME) {
+            if (button == APP_BUTTON_UP) {
+                app->weather_city_index = wrap_index(app->weather_city_index - 1, WEATHER_CITY_COUNT);
+                app->weather_stale = 1;
+            } else if (button == APP_BUTTON_DOWN) {
+                app->weather_city_index = wrap_index(app->weather_city_index + 1, WEATHER_CITY_COUNT);
+                app->weather_stale = 1;
+            } else if (button == APP_BUTTON_HOME && app->wifi_connected) {
                 app->weather_refreshes++;
+                app->weather_stale = 0;
+                app->weather_last_updated_minutes = 0;
+            } else if (button == APP_BUTTON_HOME) {
+                app->weather_stale = 1;
+                app->weather_last_updated_minutes += 30;
             }
             break;
         case APP_PAGE_CALENDAR:
-            if (button == APP_BUTTON_UP) {
+            if (app->calendar_detail_open) {
+                if (button == APP_BUTTON_UP) {
+                    app->calendar_selected_day -= 7;
+                    if (app->calendar_selected_day < 1) {
+                        app->calendar_selected_day = 1;
+                    }
+                } else if (button == APP_BUTTON_DOWN) {
+                    app->calendar_selected_day += 7;
+                    if (app->calendar_selected_day > CALENDAR_DAYS_IN_MONTH) {
+                        app->calendar_selected_day = CALENDAR_DAYS_IN_MONTH;
+                    }
+                } else if (button == APP_BUTTON_HOME) {
+                    app->calendar_detail_open = 0;
+                }
+            } else if (button == APP_BUTTON_UP) {
                 app->calendar_month_offset--;
+                app->calendar_selected_day = 15;
             } else if (button == APP_BUTTON_DOWN) {
                 app->calendar_month_offset++;
+                app->calendar_selected_day = 15;
+            } else if (button == APP_BUTTON_HOME) {
+                app->calendar_detail_open = 1;
             }
             break;
         case APP_PAGE_ENGLISH:
-            if (button == APP_BUTTON_UP) {
-                app->english_word = wrap_index(app->english_word - 1, ENGLISH_WORD_COUNT);
+            if (app->english_show_back && button == APP_BUTTON_UP) {
+                record_english_answer(app, 0);
+            } else if (app->english_show_back && button == APP_BUTTON_DOWN) {
+                record_english_answer(app, 1);
+            } else if (button == APP_BUTTON_UP) {
+                app->english_word = wrap_index(app->english_word - 1, APP_ENGLISH_WORD_COUNT);
                 app->english_show_back = 0;
             } else if (button == APP_BUTTON_DOWN) {
-                app->english_word = wrap_index(app->english_word + 1, ENGLISH_WORD_COUNT);
+                app->english_word = wrap_index(app->english_word + 1, APP_ENGLISH_WORD_COUNT);
                 app->english_show_back = 0;
             } else if (button == APP_BUTTON_HOME) {
                 app->english_show_back = !app->english_show_back;
@@ -119,17 +327,38 @@ static void handle_secondary_page(app_state_t *app, app_button_t button) {
                 app->settings_selection = wrap_index(app->settings_selection - 1, SETTINGS_COUNT);
             } else if (button == APP_BUTTON_DOWN) {
                 app->settings_selection = wrap_index(app->settings_selection + 1, SETTINGS_COUNT);
-            } else if (button == APP_BUTTON_HOME && app->settings_selection == 5) {
-                app->power_saving_enabled = !app->power_saving_enabled;
+            } else if (button == APP_BUTTON_HOME) {
+                if (app->settings_selection == 0) {
+                    app->font_size_index = wrap_index(app->font_size_index + 1, 5);
+                } else if (app->settings_selection == 2) {
+                    app->line_spacing_index = wrap_index(app->line_spacing_index + 1, 4);
+                } else if (app->settings_selection == 3) {
+                    app->wifi_connected = !app->wifi_connected;
+                } else if (app->settings_selection == 4) {
+                    app->weather_city_index = wrap_index(app->weather_city_index + 1, WEATHER_CITY_COUNT);
+                    app->weather_stale = 1;
+                } else if (app->settings_selection == 5) {
+                    app->power_saving_enabled = !app->power_saving_enabled;
+                }
             }
             break;
         case APP_PAGE_SNAKE:
-            if (button == APP_BUTTON_UP && app->snake_y > 0) {
-                app->snake_y--;
-            } else if (button == APP_BUTTON_DOWN && app->snake_y < 25) {
-                app->snake_y++;
-            } else if (button == APP_BUTTON_HOME) {
-                app->snake_x = app->snake_x < 38 ? app->snake_x + 1 : 1;
+            if (app->snake_running) {
+                if (button == APP_BUTTON_UP) {
+                    app->snake_direction = 3;
+                    snake_step(app);
+                } else if (button == APP_BUTTON_DOWN) {
+                    app->snake_direction = 1;
+                    snake_step(app);
+                } else if (button == APP_BUTTON_HOME) {
+                    snake_step(app);
+                }
+            } else if (button == APP_BUTTON_UP) {
+                app->game_selection = wrap_index(app->game_selection - 1, GAME_COUNT);
+            } else if (button == APP_BUTTON_DOWN) {
+                app->game_selection = wrap_index(app->game_selection + 1, GAME_COUNT);
+            } else if (button == APP_BUTTON_HOME && app->game_selection == 0) {
+                snake_reset(app);
             }
             break;
         default:
@@ -142,7 +371,7 @@ void app_handle_button(app_state_t *app, app_button_t button) {
         return;
     }
 
-    if (button == APP_BUTTON_POWER && app->page != APP_PAGE_HOME) {
+    if (button == APP_BUTTON_POWER && app->page != APP_PAGE_HOME && app->page != APP_PAGE_READER) {
         app->page = APP_PAGE_HOME;
         return;
     }

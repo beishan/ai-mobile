@@ -62,6 +62,10 @@ Initial navigation behavior:
 - Power returns from most function pages to home.
 - Reader bookshelf opens the selected mock book.
 - Reader page supports previous/next page with up/down.
+- Reader page opens a selectable menu with home.
+- Reader menu supports continue reading, catalog placeholder, add bookmark, and exit to bookshelf.
+- Reader menu closes with power without leaving the reader.
+- Reader page ignores bare power presses to avoid accidental exit while reading.
 - Weather home forces a mock refresh with home.
 - Calendar switches months with up/down.
 - English card flips with home and moves through mock words with up/down.
@@ -76,7 +80,15 @@ The display model uses a small enum for logical colors:
 - Black: primary text, borders, icons, and normal values.
 - Red: selected items, warnings, today's date, food/target game elements, and other emphasis.
 
-The first version may use a built-in bitmap or block text renderer rather than high-quality Chinese font rendering. UI layout should preserve the proportions and information hierarchy of the mockup: 20 px status/title bars, restrained red usage, and dense but readable 400 x 300 screens.
+The current simulator uses repository-contained Chinese bitmap font assets instead of block text. UI layout should preserve the proportions and information hierarchy of the mockup: compact 20-24 px status/title bars, restrained red usage, and dense but readable 400 x 300 screens.
+
+Current rendering baseline:
+
+- Home status bar shows time, weather summary, signal icon, battery icon, and complete battery percentage.
+- Home app grid uses four columns, image-like pixel icons, Chinese labels, and no outer tile frames.
+- Reader body uses wrapped 20 px Chinese text.
+- Reader page bottom area is intentionally blank; it does not render operation hints or a bottom progress bar.
+- Reader menu uses inverse red highlight for the selected row.
 
 Each committed frame is written to an output artifact such as a PPM image under `out/frame.ppm`, and the simulator prints the current page plus refresh count. This keeps the simulator dependency-light and easy to verify in automated tests.
 
@@ -121,6 +133,7 @@ The milestone is complete when:
 - `out/frame.ppm` updates after committed screen refreshes.
 - Host tests pass from a single command.
 - The code layout keeps simulation-specific output separate from reusable UI and state logic.
+- Timestamped visual snapshots are generated under `snapshots/YYYYMMDD-HHMMSS-label/`, including `reader.png` and `reader_menu.png`, with `snapshots/latest` pointing to the newest set.
 
 ## Deferred Decisions
 

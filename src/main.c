@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "app/app_state.h"
+#include "font/font.h"
 #include "gfx/gfx.h"
 #include "platform/sim_display.h"
 #include "ui/pages.h"
@@ -31,8 +32,8 @@ static int parse_button(const char *line, app_button_t *button) {
     return 0;
 }
 
-static int render_and_commit(gfx_framebuffer_t *fb, sim_display_t *display, const app_state_t *app) {
-    ui_render_page(fb, app);
+static int render_and_commit(gfx_framebuffer_t *fb, sim_display_t *display, const app_state_t *app, const font_t *font) {
+    ui_render_page(fb, app, font);
     if (sim_display_commit(display, fb) != 0) {
         fputs("failed to write out/frame.ppm\n", stderr);
         return 1;
@@ -48,14 +49,20 @@ int main(void) {
     app_state_t app;
     gfx_framebuffer_t fb;
     sim_display_t display;
+    font_t font;
     char line[32];
 
     app_init(&app);
     gfx_init(&fb);
+    if (!font_load_default(&font)) {
+        fputs("failed to load default font\n", stderr);
+        return 1;
+    }
     sim_display_init(&display, "out/frame.ppm");
 
     puts("reader_sim controls: w=up s=down h/enter=home p=power q=quit");
-    if (render_and_commit(&fb, &display, &app) != 0) {
+    if (render_and_commit(&fb, &display, &app, &font) != 0) {
+        font_free(&font);
         return 1;
     }
 
@@ -63,6 +70,7 @@ int main(void) {
         app_button_t button;
         if (line[0] == 'q') {
             puts("bye");
+            font_free(&font);
             return 0;
         }
 
@@ -72,10 +80,12 @@ int main(void) {
         }
 
         app_handle_button(&app, button);
-        if (render_and_commit(&fb, &display, &app) != 0) {
+        if (render_and_commit(&fb, &display, &app, &font) != 0) {
+            font_free(&font);
             return 1;
         }
     }
 
+    font_free(&font);
     return 0;
 }

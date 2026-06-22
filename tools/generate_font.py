@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+FONT_PATH = "/System/Library/Fonts/PingFang.ttc"
+OUT_DIR = Path("assets/fonts")
+SIZES = [12, 14, 16, 18, 20, 22, 24]
+MAX_BITMAP_BYTES = 96
+
+TEXT = """
+阅读天气日历游戏英语设置关于书架最近三体刘慈欣百年孤独马尔克斯活着余华第章黑暗森林
+北京上海广州晴转多云小雨湿度风力今天明天后天空气质量良更新于缓存分钟前农历五月十九
+单词学习复习释义例句认识不认识下一词机缘巧合电子阅读器纸张字体宋体大小行间距紧凑标准舒适宽松省电模式已连接城市固件版本芯片型号
+贪吃蛇分上下键移动暂停返回主页上一页下一页刷新中电量不足即将关机目录书签退出
+推箱子数独最高分已完成关初级中级高级错误选中当前转向前进游戏结束重新开始预览功能
+年月周一二三四五六
+详情夏至宜阅读无日程提醒
+这是一个宁静的夜晚城市灯光在远处闪烁像片低垂星空他翻到等待墨水屏缓慢完成，。
+继续查看添加未开关闭项目地址存储卡版本信息
+开端转折回声多年以后面对远方吹来热风想起那个潮湿明亮下午小镇钟声很慢从纸页深处传来
+田野安静麦穗掠过把书合上又打开仿佛那些旧日子仍然黑白之间缓缓移动
+"""
+
+ASCII = "".join(chr(i) for i in range(32, 127))
+GLYPHS = sorted(set(ASCII + "".join(TEXT.split())))
+
+
+def glyph_record(font: ImageFont.FreeTypeFont, char: str, size: int) -> tuple[int, int, int, list[int]]:
+    image = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(image)
+    bbox = draw.textbbox((0, 0), char, font=font)
+    width = max(1, min(size, bbox[2] - bbox[0]))
+    height = max(1, min(size, bbox[3] - bbox[1]))
+
+    def clamp_position(centered: int, lower: int, upper: int) -> int:
+        if upper < lower:
+            return lower
+        return max(lower, min(upper, centered))
+
+    x = clamp_position((size - width) // 2 - bbox[0], -bbox[0], size - bbox[2])
+    y = clamp_position((size - height) // 2 - bbox[1], -bbox[1], size - bbox[3])
+    draw.text((x, y), char, fill=255, font=font)
+
+    advance = int(round(draw.textlength(char, font=font)))
+    if ord(char) < 128:
+        advance = max(3, min(size, advance))
+    else:
+        advance = size
+
+    bytes_per_row = (size + 7) // 8
+    data: list[int] = []
+    for row in range(size):
+        for byte_index in range(bytes_per_row):
+            value = 0
+            for bit in range(8):
+                col = byte_index * 8 + bit
+                if col < size and image.getpixel((col, row)) > 96:
+                    value |= 1 << (7 - bit)
+            data.append(value)
+    return width, height, advance, data
+
+
+def write_font(size: int) -> None:
+    font = ImageFont.truetype(FONT_PATH, size)
+    ident = f"sim_zh{size}"
+    guard = f"SIM_ZH{size}_H"
+    out_path = OUT_DIR / f"{ident}.h"
+    bytes_per_row = (size + 7) // 8
+    bytes_per_glyph = bytes_per_row * size
+
+    lines: list[str] = []
+    lines.append(f"#ifndef {guard}")
+    lines.append(f"#define {guard}")
+    lines.append("")
+    lines.append("#include <stdint.h>")
+    lines.append("")
+    lines.append(f"#define SIM_ZH{size}_SIZE {size}")
+    lines.append(f"#define SIM_ZH{size}_BYTES_PER_GLYPH {bytes_per_glyph}")
+    lines.append("")
+    lines.append("typedef struct {")
+    lines.append("    uint32_t codepoint;")
+    lines.append("    uint8_t width;")
+    lines.append("    uint8_t height;")
+    lines.append("    uint8_t advance;")
+    lines.append(f"    uint8_t bitmap[{MAX_BITMAP_BYTES}];")
+    lines.append(f"}} {ident}_glyph_t;")
+    lines.append("")
+    lines.append(f"static const {ident}_glyph_t {ident}_glyphs[] = {{")
+
+    for char in GLYPHS:
+        width, height, advance, data = glyph_record(font, char, size)
+        data = data + [0] * (MAX_BITMAP_BYTES - len(data))
+        hex_bytes = ", ".join(f"0x{byte:02x}" for byte in data)
+        lines.append(f"    {{0x{ord(char):04x}, {width}, {height}, {advance}, {{{hex_bytes}}}}},")
+
+    lines.append("};")
+    lines.append("")
+    lines.append(f"static const int {ident}_glyph_count = (int)(sizeof({ident}_glyphs) / sizeof({ident}_glyphs[0]));")
+    lines.append("")
+    lines.append("#endif")
+    lines.append("")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"wrote {out_path} with {len(GLYPHS)} glyphs")
+
+
+def main() -> None:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for size in SIZES:
+        write_font(size)
+
+
+if __name__ == "__main__":
+    main()
