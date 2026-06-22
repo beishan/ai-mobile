@@ -80,7 +80,11 @@ void esp_display_init(esp_display_t *display) {
     display->refresh_count = 0;
     display->hardware_ready = 0;
     display->spi = NULL;
-    ESP_LOGI(TAG, "display adapter initialized for 400x300 tri-color framebuffer");
+    ESP_LOGI(TAG, "display adapter initialized for %s controller=%s framebuffer=%dx%d",
+             ESP_EPD_PANEL_NAME,
+             ESP_EPD_DRIVER_IC,
+             GFX_WIDTH,
+             GFX_HEIGHT);
     ESP_LOGI(TAG, "EPD pins: BUSY=%d RST=%d DC=%d CS=%d SCK=%d SDA=%d VCC=%s GND=%s",
              ESP_EPD_PIN_BUSY,
              ESP_EPD_PIN_RST,
@@ -162,9 +166,7 @@ int esp_display_send_data(esp_display_t *display, const unsigned char *data, int
 int esp_display_present(esp_display_t *display, const gfx_framebuffer_t *fb) {
     static epd_frame_t frame;
     int black = 0;
-    int red = 0;
     unsigned int black_checksum = 0;
-    unsigned int red_checksum = 0;
     if (display == NULL || fb == NULL) {
         return -1;
     }
@@ -174,29 +176,22 @@ int esp_display_present(esp_display_t *display, const gfx_framebuffer_t *fb) {
     }
 
     for (int i = 0; i < EPD_FRAME_BYTES; i++) {
-        unsigned char black_byte = frame.black[i];
-        unsigned char red_byte = frame.red[i];
-        black_checksum = (black_checksum * 33u) ^ black_byte;
-        red_checksum = (red_checksum * 33u) ^ red_byte;
+        unsigned char bw_byte = frame.bw[i];
+        black_checksum = (black_checksum * 33u) ^ bw_byte;
         for (int bit = 0; bit < 8; bit++) {
             unsigned char mask = (unsigned char)(0x80u >> bit);
-            if ((black_byte & mask) == 0) {
+            if ((bw_byte & mask) == 0) {
                 black++;
-            }
-            if ((red_byte & mask) == 0) {
-                red++;
             }
         }
     }
 
     display->refresh_count++;
-    ESP_LOGI(TAG, "present frame %d: bytes=%d black=%d red=%d black_sum=%08x red_sum=%08x hardware_ready=%d",
+    ESP_LOGI(TAG, "present SSD677 BW frame %d: bytes=%d black=%d bw_sum=%08x hardware_ready=%d",
              display->refresh_count,
              EPD_FRAME_BYTES,
              black,
-             red,
              black_checksum,
-             red_checksum,
              display->hardware_ready);
     return 0;
 }

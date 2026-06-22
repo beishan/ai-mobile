@@ -9,7 +9,6 @@ typedef enum {
     APP_PAGE_CALENDAR,
     APP_PAGE_ENGLISH,
     APP_PAGE_SETTINGS,
-    APP_PAGE_SNAKE,
     APP_PAGE_ABOUT
 } app_page_t;
 
@@ -55,15 +54,6 @@ typedef struct {
     int line_spacing_index;
     int wifi_connected;
     int power_saving_enabled;
-    int game_selection;
-    int snake_x;
-    int snake_y;
-    int snake_score;
-    int snake_running;
-    int snake_direction;
-    int snake_food_x;
-    int snake_food_y;
-    int snake_game_over;
 } app_state_t;
 
 void app_init(app_state_t *app);

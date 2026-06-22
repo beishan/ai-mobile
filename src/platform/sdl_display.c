@@ -6,8 +6,6 @@ static Uint32 color_to_argb(gfx_color_t color) {
     switch (color) {
         case GFX_BLACK:
             return 0xff232320u;
-        case GFX_RED:
-            return 0xffe64840u;
         case GFX_WHITE:
         default:
             return 0xfff5f4ecu;

@@ -32,39 +32,38 @@ static void home_status_bar(gfx_framebuffer_t *fb, const font_t *font) {
     (void)font;
     gfx_fill_rect(fb, 0, 0, GFX_WIDTH, 24, GFX_BLACK);
     font_draw_text(small, fb, 8, 4, "14:35  晴 26C 北京", GFX_WHITE);
-    draw_wifi_icon(fb, 310, 5, GFX_WHITE);
-    draw_battery_icon(fb, 334, 4, 78, GFX_WHITE);
-    font_draw_text(small, fb, 364, 4, "78%", GFX_WHITE);
+    draw_wifi_icon(fb, GFX_WIDTH - 90, 5, GFX_WHITE);
+    draw_battery_icon(fb, GFX_WIDTH - 66, 4, 78, GFX_WHITE);
+    font_draw_text(small, fb, GFX_WIDTH - 36, 4, "78%", GFX_WHITE);
 }
 
 static void app_tile(gfx_framebuffer_t *fb, const font_t *font, ui_icon_kind_t icon, int x, int y, const char *label, int selected) {
     const font_face_t *label_font = font_get_face(FONT_SIZE_14);
     (void)font;
     if (selected) {
-        gfx_fill_rect(fb, x + 24, y + 76, 40, 4, GFX_RED);
-        gfx_fill_rect(fb, x + 14, y + 20, 4, 24, GFX_RED);
+        gfx_fill_rect(fb, x + 24, y + 76, 40, 4, GFX_BLACK);
+        gfx_fill_rect(fb, x + 14, y + 20, 4, 24, GFX_BLACK);
     }
     ui_draw_icon(fb, icon, x + 20, y + 6, 0);
     font_draw_text_aligned(label_font, fb, x, y + 58, 88, label, FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    const char *items[] = {"阅读", "天气", "日历", "游戏", "英语", "设置", "关于"};
+    const char *items[] = {"阅读", "天气", "日历", "英语", "设置", "关于"};
     const ui_icon_kind_t icons[] = {
         UI_ICON_READER,
         UI_ICON_WEATHER,
         UI_ICON_CALENDAR,
-        UI_ICON_GAME,
         UI_ICON_ENGLISH,
         UI_ICON_SETTINGS,
         UI_ICON_ABOUT
     };
-    const int xs[] = {4, 103, 202, 301, 4, 103, 202};
-    const int ys[] = {42, 42, 42, 42, 142, 142, 142};
+    const int xs[] = {34, 196, 358, 34, 196, 358};
+    const int ys[] = {72, 72, 72, 202, 202, 202};
 
     home_status_bar(fb, font);
 
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 6; i++) {
         app_tile(fb, font, icons[i], xs[i], ys[i], items[i], app->home_selection == i);
     }
 }
@@ -83,7 +82,7 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
         char meta[48];
         snprintf(meta, sizeof(meta), "%s %d%%", authors[i], percent);
         if (app->bookshelf_selection == i) {
-            gfx_fill_rect(fb, 12, y, 376, 58, GFX_RED);
+            gfx_fill_rect(fb, 12, y, 376, 58, GFX_BLACK);
             gfx_fill_rect(fb, 15, y + 3, 370, 52, GFX_WHITE);
         }
         gfx_draw_rect(fb, 12, y, 376, 58, GFX_BLACK);
@@ -92,11 +91,11 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
         gfx_fill_rect(fb, 302, y + 18, fill, 12, GFX_BLACK);
         gfx_draw_rect(fb, 302, y + 18, 74, 12, GFX_BLACK);
         if (app->recent_book == i) {
-            gfx_fill_rect(fb, 302, y + 36, 38, 16, GFX_RED);
+            gfx_fill_rect(fb, 302, y + 36, 38, 16, GFX_BLACK);
             font_draw_text(small, fb, 306, y + 38, "最近", GFX_WHITE);
         }
         if (app->book_bookmark_pages[i] >= 0) {
-            gfx_fill_rect(fb, 366, y + 36, 8, 12, GFX_RED);
+            gfx_fill_rect(fb, 366, y + 36, 8, 12, GFX_BLACK);
         }
     }
 }
@@ -147,12 +146,12 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
         };
         gfx_fill_rect(fb, 88, 64, 224, 138, GFX_WHITE);
         gfx_draw_rect(fb, 88, 64, 224, 138, GFX_BLACK);
-        gfx_fill_rect(fb, 88, 64, 224, 4, GFX_RED);
+        gfx_fill_rect(fb, 88, 64, 224, 4, GFX_BLACK);
         for (int i = 0; i < 4; i++) {
             int y = 82 + i * 28;
             gfx_color_t color = GFX_BLACK;
             if (app->reader_menu_selection == i) {
-                gfx_fill_rect(fb, 104, y - 5, 192, 24, GFX_RED);
+                gfx_fill_rect(fb, 104, y - 5, 192, 24, GFX_BLACK);
                 color = GFX_WHITE;
             }
             font_draw_text(menu, fb, 124, y, items[i], color);
@@ -161,13 +160,13 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
             const char *chapters[] = {"第一章  开端", "第二章  转折", "第三章  回声"};
             gfx_fill_rect(fb, 66, 52, 268, 164, GFX_WHITE);
             gfx_draw_rect(fb, 66, 52, 268, 164, GFX_BLACK);
-            gfx_fill_rect(fb, 66, 52, 268, 4, GFX_RED);
+            gfx_fill_rect(fb, 66, 52, 268, 4, GFX_BLACK);
             font_draw_text(font_get_face(FONT_SIZE_14), fb, 86, 68, "目录", GFX_BLACK);
             for (int i = 0; i < 3; i++) {
                 int y = 98 + i * 32;
                 gfx_color_t color = GFX_BLACK;
                 if (app->reader_catalog_selection == i) {
-                    gfx_fill_rect(fb, 82, y - 5, 236, 24, GFX_RED);
+                    gfx_fill_rect(fb, 82, y - 5, 236, 24, GFX_BLACK);
                     color = GFX_WHITE;
                 }
                 font_draw_text(menu, fb, 98, y, chapters[i], color);
@@ -199,9 +198,9 @@ static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const 
     snprintf(summary, sizeof(summary), "%s  湿度%d%%", conditions[city], humidities[city]);
     snprintf(cache, sizeof(cache), "%s %d分钟前", app->weather_stale ? "缓存" : "更新", app->weather_last_updated_minutes);
     font_draw_text_aligned(normal, fb, 0, 38, GFX_WIDTH, cities[city], FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_aligned(big, fb, 0, 64, GFX_WIDTH, temp, FONT_ALIGN_CENTER, app->weather_stale ? GFX_RED : GFX_BLACK);
+    font_draw_text_aligned(big, fb, 0, 64, GFX_WIDTH, temp, FONT_ALIGN_CENTER, app->weather_stale ? GFX_BLACK : GFX_BLACK);
     font_draw_text_aligned(small, fb, 0, 102, GFX_WIDTH, summary, FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_aligned(small, fb, 0, 126, GFX_WIDTH, cache, FONT_ALIGN_CENTER, app->weather_stale ? GFX_RED : GFX_BLACK);
+    font_draw_text_aligned(small, fb, 0, 126, GFX_WIDTH, cache, FONT_ALIGN_CENTER, app->weather_stale ? GFX_BLACK : GFX_BLACK);
 
     gfx_draw_rect(fb, 32, 150, 92, 60, GFX_BLACK);
     gfx_draw_rect(fb, 154, 150, 92, 60, GFX_BLACK);
@@ -211,11 +210,11 @@ static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const 
     snprintf(summary, sizeof(summary), "明天%d", temps[city] - 2);
     font_draw_text_aligned(small, fb, 154, 172, 92, summary, FONT_ALIGN_CENTER, GFX_BLACK);
     snprintf(summary, sizeof(summary), "后天%d", lows[city]);
-    font_draw_text_aligned(small, fb, 276, 172, 92, summary, FONT_ALIGN_CENTER, lows[city] < 20 ? GFX_RED : GFX_BLACK);
+    font_draw_text_aligned(small, fb, 276, 172, 92, summary, FONT_ALIGN_CENTER, lows[city] < 20 ? GFX_BLACK : GFX_BLACK);
 
     font_draw_text_aligned(small, fb, 42, 232, 316, "空气质量 良", FONT_ALIGN_CENTER, GFX_BLACK);
     gfx_draw_rect(fb, 42, 260, 316, 12, GFX_BLACK);
-    gfx_fill_rect(fb, 42, 260, app->weather_stale ? 96 : 180, 12, app->weather_stale ? GFX_BLACK : GFX_RED);
+    gfx_fill_rect(fb, 42, 260, app->weather_stale ? 96 : 180, 12, app->weather_stale ? GFX_BLACK : GFX_BLACK);
 }
 
 static void render_calendar(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
@@ -237,7 +236,7 @@ static void render_calendar(gfx_framebuffer_t *fb, const app_state_t *app, const
 
     const char *week[] = {"日", "一", "二", "三", "四", "五", "六"};
     for (int i = 0; i < 7; i++) {
-        font_draw_text_aligned(small, fb, 30 + i * 49, 42, 28, week[i], FONT_ALIGN_CENTER, i == 0 || i == 6 ? GFX_RED : GFX_BLACK);
+        font_draw_text_aligned(small, fb, 30 + i * 49, 42, 28, week[i], FONT_ALIGN_CENTER, i == 0 || i == 6 ? GFX_BLACK : GFX_BLACK);
     }
     for (int day = 1; day <= 30; day++) {
         int col = (day + 5) % 7;
@@ -247,23 +246,23 @@ static void render_calendar(gfx_framebuffer_t *fb, const app_state_t *app, const
         char label[4];
         snprintf(label, sizeof(label), "%d", day);
         if (day == app->calendar_selected_day) {
-            gfx_draw_rect(fb, x - 11, y - 10, 36, 28, GFX_RED);
-            gfx_draw_rect(fb, x - 10, y - 9, 34, 26, GFX_RED);
+            gfx_draw_rect(fb, x - 11, y - 10, 36, 28, GFX_BLACK);
+            gfx_draw_rect(fb, x - 10, y - 9, 34, 26, GFX_BLACK);
         }
         if (day == 15 && app->calendar_month_offset == 0) {
-            gfx_fill_rect(fb, x - 8, y - 8, 30, 24, GFX_RED);
+            gfx_fill_rect(fb, x - 8, y - 8, 30, 24, GFX_BLACK);
         }
-        font_draw_text_aligned(small, fb, x - 8, y, 32, label, FONT_ALIGN_CENTER, day == 15 && app->calendar_month_offset == 0 ? GFX_WHITE : ((col == 0 || col == 6) ? GFX_RED : GFX_BLACK));
+        font_draw_text_aligned(small, fb, x - 8, y, 32, label, FONT_ALIGN_CENTER, day == 15 && app->calendar_month_offset == 0 ? GFX_WHITE : ((col == 0 || col == 6) ? GFX_BLACK : GFX_BLACK));
     }
     if (app->calendar_detail_open) {
         char selected[32];
         snprintf(selected, sizeof(selected), "%d月%d日", month, app->calendar_selected_day);
         gfx_fill_rect(fb, 28, 250, 344, 44, GFX_WHITE);
         gfx_draw_rect(fb, 28, 250, 344, 44, GFX_BLACK);
-        gfx_fill_rect(fb, 28, 250, 344, 3, GFX_RED);
+        gfx_fill_rect(fb, 28, 250, 344, 3, GFX_BLACK);
         font_draw_text_aligned(normal, fb, 34, 258, 116, selected, FONT_ALIGN_CENTER, GFX_BLACK);
         font_draw_text_aligned(small, fb, 152, 258, 208, "农历五月十九 宜阅读", FONT_ALIGN_CENTER, GFX_BLACK);
-        font_draw_text_aligned(small, fb, 34, 276, 326, app->calendar_selected_day == 21 ? "节气 夏至" : "无日程提醒", FONT_ALIGN_CENTER, app->calendar_selected_day == 21 ? GFX_RED : GFX_BLACK);
+        font_draw_text_aligned(small, fb, 34, 276, 326, app->calendar_selected_day == 21 ? "节气 夏至" : "无日程提醒", FONT_ALIGN_CENTER, app->calendar_selected_day == 21 ? GFX_BLACK : GFX_BLACK);
     } else {
         font_draw_text_aligned(small, fb, 0, 262, GFX_WIDTH, "农历 五月十九  夏至 6月21日", FONT_ALIGN_CENTER, GFX_BLACK);
     }
@@ -281,28 +280,28 @@ static void render_english(gfx_framebuffer_t *fb, const app_state_t *app, const 
     char stats[48];
     snprintf(progress, sizeof(progress), "%d/3", app->english_word + 1);
     title_bar(fb, font, "英语学习", progress);
-    gfx_draw_rect(fb, 42, 56, 316, 92, GFX_RED);
+    gfx_draw_rect(fb, 42, 56, 316, 92, GFX_BLACK);
     font_draw_text_aligned(big, fb, 42, 80, 316, words[app->english_word], FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_aligned(small, fb, 42, 120, 316, sounds[app->english_word], FONT_ALIGN_CENTER, GFX_RED);
+    font_draw_text_aligned(small, fb, 42, 120, 316, sounds[app->english_word], FONT_ALIGN_CENTER, GFX_BLACK);
     snprintf(stats, sizeof(stats), "认识%d 复习%d", app->english_known_count, app->english_review_count);
     font_draw_text_aligned(small, fb, 0, 162, GFX_WIDTH, stats, FONT_ALIGN_CENTER, GFX_BLACK);
     if (app->english_show_back) {
         font_draw_text_aligned(normal, fb, 0, 190, GFX_WIDTH, meanings[app->english_word], FONT_ALIGN_CENTER, GFX_BLACK);
         font_draw_text_aligned(small, fb, 0, 216, GFX_WIDTH, examples[app->english_word], FONT_ALIGN_CENTER, GFX_BLACK);
-        font_draw_text_aligned(small, fb, 0, 252, GFX_WIDTH, "上键不认识  下键认识", FONT_ALIGN_CENTER, GFX_RED);
+        font_draw_text_aligned(small, fb, 0, 252, GFX_WIDTH, "上键不认识  下键认识", FONT_ALIGN_CENTER, GFX_BLACK);
     } else {
         font_draw_text_aligned(small, fb, 0, 210, GFX_WIDTH, "HOME 翻转查看释义", FONT_ALIGN_CENTER, GFX_BLACK);
     }
     for (int i = 0; i < 3; i++) {
         gfx_color_t color = GFX_BLACK;
         if (app->english_answer_state[i] == 1) {
-            color = GFX_RED;
+            color = GFX_BLACK;
         } else if (i == app->english_word) {
-            color = GFX_RED;
+            color = GFX_BLACK;
         }
         gfx_fill_rect(fb, 165 + i * 23, 276, 10, 10, color);
         if (app->english_answer_state[i] == 2) {
-            gfx_draw_rect(fb, 164 + i * 23, 275, 12, 12, GFX_RED);
+            gfx_draw_rect(fb, 164 + i * 23, 275, 12, 12, GFX_BLACK);
         }
     }
 }
@@ -324,60 +323,13 @@ static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const
     for (int i = 0; i < 6; i++) {
         int y = 38 + i * 39;
         if (app->settings_selection == i) {
-            gfx_fill_rect(fb, 0, y, GFX_WIDTH, 32, GFX_RED);
+            gfx_fill_rect(fb, 0, y, GFX_WIDTH, 32, GFX_BLACK);
             gfx_fill_rect(fb, 0, y + 2, GFX_WIDTH, 28, GFX_WHITE);
         }
         font_draw_text(normal, fb, 22, y + 7, rows[i], GFX_BLACK);
         if (i == 5 && app->power_saving_enabled) {
-            gfx_fill_rect(fb, 330, y + 6, 36, 20, GFX_RED);
+            gfx_fill_rect(fb, 330, y + 6, 36, 20, GFX_BLACK);
         }
-    }
-}
-
-static void render_snake(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    const font_face_t *normal = font_get_face(FONT_SIZE_16);
-    const font_face_t *small = font_get_face(FONT_SIZE_14);
-    const char *games[] = {"贪吃蛇  最高分:48", "推箱子  已完成:3/20", "数独    中级完成"};
-    char score[16];
-    const int board_x = 20;
-    const int board_y = 132;
-    const int cell = 10;
-    snprintf(score, sizeof(score), "分:%d", app->snake_score);
-    title_bar(fb, font, "游戏", score);
-    for (int i = 0; i < 3; i++) {
-        int y = 34 + i * 28;
-        if (app->game_selection == i) {
-            gfx_fill_rect(fb, 16, y, 360, 24, GFX_RED);
-            gfx_fill_rect(fb, 18, y + 2, 356, 20, GFX_WHITE);
-        }
-        font_draw_text(normal, fb, 28, y + 4, games[i], GFX_BLACK);
-    }
-
-    gfx_draw_rect(fb, 16, 126, 368, 112, GFX_BLACK);
-    for (int x = board_x; x < board_x + 360; x += cell) {
-        gfx_set_pixel(fb, x, 128, GFX_BLACK);
-    }
-    for (int y = board_y; y < board_y + 100; y += cell) {
-        gfx_set_pixel(fb, 18, y, GFX_BLACK);
-    }
-
-    gfx_fill_rect(fb, board_x + app->snake_food_x * cell + 2, board_y + app->snake_food_y * cell + 2, 6, 6, GFX_RED);
-    for (int i = 3; i >= 0; i--) {
-        int segment_x = app->snake_x - i;
-        if (segment_x >= 0) {
-            gfx_fill_rect(fb, board_x + segment_x * cell + 1, board_y + app->snake_y * cell + 1, 8, 8, GFX_BLACK);
-        }
-    }
-    gfx_draw_rect(fb, board_x + app->snake_x * cell, board_y + app->snake_y * cell, 10, 10, GFX_RED);
-
-    if (app->snake_game_over) {
-        font_draw_text_aligned(normal, fb, 0, 252, GFX_WIDTH, "游戏结束  HOME重新开始", FONT_ALIGN_CENTER, GFX_BLACK);
-    } else if (app->snake_running) {
-        font_draw_text_aligned(small, fb, 0, 254, GFX_WIDTH, "上/下转向  HOME前进", FONT_ALIGN_CENTER, GFX_BLACK);
-    } else if (app->game_selection == 0) {
-        font_draw_text_aligned(small, fb, 0, 254, GFX_WIDTH, "HOME开始", FONT_ALIGN_CENTER, GFX_BLACK);
-    } else {
-        font_draw_text_aligned(small, fb, 0, 254, GFX_WIDTH, "预览功能", FONT_ALIGN_CENTER, GFX_BLACK);
     }
 }
 
@@ -389,7 +341,8 @@ static void render_about(gfx_framebuffer_t *fb, const font_t *font) {
     font_draw_text(small, fb, 70, 108, "固件版本 SIM V0", GFX_BLACK);
     font_draw_text(small, fb, 70, 146, "芯片型号 ESP32 N16R8", GFX_BLACK);
     font_draw_text(small, fb, 70, 184, "Flash 16MB  PSRAM 8MB", GFX_BLACK);
-    font_draw_text_aligned(normal, fb, 0, 230, GFX_WIDTH, "400X300 三色显示", FONT_ALIGN_CENTER, GFX_RED);
+    font_draw_text_aligned(normal, fb, 0, 230, GFX_WIDTH, "4.26寸 480X800 黑白高刷", FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned(small, fb, 0, 258, GFX_WIDTH, "SSD677 SPI", FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
@@ -419,9 +372,6 @@ void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t 
             break;
         case APP_PAGE_SETTINGS:
             render_settings(fb, app, font);
-            break;
-        case APP_PAGE_SNAKE:
-            render_snake(fb, app, font);
             break;
         case APP_PAGE_ABOUT:
         default:

@@ -3,13 +3,12 @@
 
 #include <stdint.h>
 
-#define GFX_WIDTH 400
-#define GFX_HEIGHT 300
+#define GFX_WIDTH 480
+#define GFX_HEIGHT 800
 
 typedef enum {
     GFX_WHITE = 0,
-    GFX_BLACK = 1,
-    GFX_RED = 2
+    GFX_BLACK = 1
 } gfx_color_t;
 
 typedef struct {

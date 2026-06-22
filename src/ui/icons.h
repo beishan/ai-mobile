@@ -7,7 +7,6 @@ typedef enum {
     UI_ICON_READER = 0,
     UI_ICON_WEATHER,
     UI_ICON_CALENDAR,
-    UI_ICON_GAME,
     UI_ICON_ENGLISH,
     UI_ICON_SETTINGS,
     UI_ICON_ABOUT

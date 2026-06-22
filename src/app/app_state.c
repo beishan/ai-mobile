@@ -2,15 +2,12 @@
 
 #include <stddef.h>
 
-#define HOME_ITEM_COUNT 7
+#define HOME_ITEM_COUNT 6
 #define READER_MENU_COUNT 4
 #define READER_CATALOG_COUNT 3
 #define WEATHER_CITY_COUNT 3
 #define CALENDAR_DAYS_IN_MONTH 30
 #define SETTINGS_COUNT 6
-#define GAME_COUNT 3
-#define SNAKE_BOARD_COLS 36
-#define SNAKE_BOARD_ROWS 10
 
 static app_page_t page_for_home_selection(int selection) {
     switch (selection) {
@@ -21,12 +18,10 @@ static app_page_t page_for_home_selection(int selection) {
         case 2:
             return APP_PAGE_CALENDAR;
         case 3:
-            return APP_PAGE_SNAKE;
-        case 4:
             return APP_PAGE_ENGLISH;
-        case 5:
+        case 4:
             return APP_PAGE_SETTINGS;
-        case 6:
+        case 5:
         default:
             return APP_PAGE_ABOUT;
     }
@@ -82,52 +77,6 @@ static void record_english_answer(app_state_t *app, int known) {
     app->english_show_back = 0;
 }
 
-static void snake_reset(app_state_t *app) {
-    app->snake_x = 4;
-    app->snake_y = 5;
-    app->snake_score = 0;
-    app->snake_running = 1;
-    app->snake_direction = 0;
-    app->snake_food_x = 28;
-    app->snake_food_y = 5;
-    app->snake_game_over = 0;
-}
-
-static void snake_place_next_food(app_state_t *app) {
-    app->snake_food_x = (app->snake_food_x + 7) % SNAKE_BOARD_COLS;
-    app->snake_food_y = (app->snake_food_y + 3) % SNAKE_BOARD_ROWS;
-    if (app->snake_food_x == app->snake_x && app->snake_food_y == app->snake_y) {
-        app->snake_food_x = (app->snake_food_x + 5) % SNAKE_BOARD_COLS;
-    }
-}
-
-static void snake_step(app_state_t *app) {
-    int next_x = app->snake_x;
-    int next_y = app->snake_y;
-    if (app->snake_direction == 0) {
-        next_x++;
-    } else if (app->snake_direction == 1) {
-        next_y++;
-    } else if (app->snake_direction == 2) {
-        next_x--;
-    } else {
-        next_y--;
-    }
-
-    if (next_x < 0 || next_x >= SNAKE_BOARD_COLS || next_y < 0 || next_y >= SNAKE_BOARD_ROWS) {
-        app->snake_running = 0;
-        app->snake_game_over = 1;
-        return;
-    }
-
-    app->snake_x = next_x;
-    app->snake_y = next_y;
-    if (app->snake_x == app->snake_food_x && app->snake_y == app->snake_food_y) {
-        app->snake_score += 10;
-        snake_place_next_food(app);
-    }
-}
-
 void app_init(app_state_t *app) {
     if (app == NULL) {
         return;
@@ -170,15 +119,6 @@ void app_init(app_state_t *app) {
     app->line_spacing_index = 2;
     app->wifi_connected = 1;
     app->power_saving_enabled = 1;
-    app->game_selection = 0;
-    app->snake_x = 4;
-    app->snake_y = 5;
-    app->snake_score = 0;
-    app->snake_running = 0;
-    app->snake_direction = 0;
-    app->snake_food_x = 28;
-    app->snake_food_y = 5;
-    app->snake_game_over = 0;
 }
 
 static void handle_home(app_state_t *app, app_button_t button) {
@@ -342,25 +282,6 @@ static void handle_secondary_page(app_state_t *app, app_button_t button) {
                 }
             }
             break;
-        case APP_PAGE_SNAKE:
-            if (app->snake_running) {
-                if (button == APP_BUTTON_UP) {
-                    app->snake_direction = 3;
-                    snake_step(app);
-                } else if (button == APP_BUTTON_DOWN) {
-                    app->snake_direction = 1;
-                    snake_step(app);
-                } else if (button == APP_BUTTON_HOME) {
-                    snake_step(app);
-                }
-            } else if (button == APP_BUTTON_UP) {
-                app->game_selection = wrap_index(app->game_selection - 1, GAME_COUNT);
-            } else if (button == APP_BUTTON_DOWN) {
-                app->game_selection = wrap_index(app->game_selection + 1, GAME_COUNT);
-            } else if (button == APP_BUTTON_HOME && app->game_selection == 0) {
-                snake_reset(app);
-            }
-            break;
         default:
             break;
     }
@@ -408,8 +329,6 @@ const char *app_page_name(app_page_t page) {
             return "english";
         case APP_PAGE_SETTINGS:
             return "settings";
-        case APP_PAGE_SNAKE:
-            return "snake";
         case APP_PAGE_ABOUT:
             return "about";
         default:

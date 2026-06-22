@@ -7,8 +7,7 @@ int epd_frame_pack(const gfx_framebuffer_t *fb, epd_frame_t *frame) {
         return -1;
     }
 
-    memset(frame->black, 0xff, sizeof(frame->black));
-    memset(frame->red, 0xff, sizeof(frame->red));
+    memset(frame->bw, 0xff, sizeof(frame->bw));
 
     for (int y = 0; y < GFX_HEIGHT; y++) {
         for (int x = 0; x < GFX_WIDTH; x++) {
@@ -18,9 +17,7 @@ int epd_frame_pack(const gfx_framebuffer_t *fb, epd_frame_t *frame) {
             gfx_color_t pixel = gfx_get_pixel(fb, x, y);
 
             if (pixel == GFX_BLACK) {
-                frame->black[byte_index] &= (unsigned char)~mask;
-            } else if (pixel == GFX_RED) {
-                frame->red[byte_index] &= (unsigned char)~mask;
+                frame->bw[byte_index] &= (unsigned char)~mask;
             }
         }
     }

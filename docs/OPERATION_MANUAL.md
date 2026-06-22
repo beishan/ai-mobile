@@ -1,5 +1,12 @@
 # Operation Manual
 
+## Target
+
+- Device: ESP32 N16R8 reader.
+- Display: 4.26 inch 480 x 800 black/white high-refresh E-Ink.
+- Controller: SSD677.
+- Interface: SPI.
+
 ## ESP32 Firmware Build
 
 Build the real-device firmware:
@@ -22,9 +29,7 @@ pio device monitor -e esp32-n16r8
 
 ## E-Ink Wiring
 
-The wiring map is centralized in `src/platform/esp_board_config.h`. Change that
-file first if the hardware wiring changes, then update this table and
-`requires01.md`.
+The wiring map is centralized in `src/platform/esp_board_config.h`. Change that file first if hardware wiring changes, then update this table and `requires01.md`.
 
 | EPD pin | ESP32 pin |
 |---------|-----------|
@@ -33,7 +38,7 @@ file first if the hardware wiring changes, then update this table and
 | DC | GPIO17 |
 | CS | GPIO5 |
 | SCK | GPIO18 |
-| SDA | GPIO23 |
+| SDA/MOSI | GPIO23 |
 | GND | GND |
 | VCC | 3V |
 
@@ -46,12 +51,12 @@ Button wiring:
 | HOME | GPIO34 | External 10k pull-up to 3.3V |
 | DOWN | GPIO39 | External 10k pull-up to 3.3V |
 
-Current firmware status:
+## Current Firmware Status
 
-- `app_main` renders the shared UI into the 400 x 300 framebuffer.
+- `app_main` renders the shared UI into the 480 x 800 framebuffer.
 - `esp_display` configures CS/DC/RST as outputs, BUSY as input, and initializes the SPI bus on SCK/SDA.
 - `esp_display` provides reset, busy wait, command send, and data send primitives.
-- `platform/epd_frame` packs each rendered frame into 15,000-byte black and red 1bpp planes.
+- `platform/epd_frame` packs each rendered frame into one 48,000-byte black/white 1bpp plane.
 - `esp_input` polls POWER/UP/HOME/DOWN and routes button events into `app_handle_button`; each event re-renders and presents a new frame.
-- Frame presentation logs packed byte counts, black/red pixel counts, and checksums until the exact controller init/refresh sequence is added.
-- Physical panel refresh still needs the exact E-Ink controller command sequence.
+- Frame presentation logs packed SSD677 black/white byte counts, black pixel counts, and checksums until the exact controller command sequence is added.
+- Physical panel refresh still needs the exact SSD677 init, window, update, waveform, and sleep sequence from the panel vendor datasheet.

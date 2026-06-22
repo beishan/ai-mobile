@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (!sdl_display_init(&display, "ESP32 三色墨水屏阅读器", 3)) {
+    if (!sdl_display_init(&display, "ESP32 480x800 BW SSD677 Reader", 1)) {
         fputs("failed to initialize SDL2 display\n", stderr);
         font_free(&font);
         return 1;

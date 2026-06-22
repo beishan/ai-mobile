@@ -36,11 +36,6 @@ static void color_to_rgb(gfx_color_t color, unsigned char rgb[3]) {
             rgb[1] = 35;
             rgb[2] = 32;
             break;
-        case GFX_RED:
-            rgb[0] = 230;
-            rgb[1] = 72;
-            rgb[2] = 64;
-            break;
         case GFX_WHITE:
         default:
             rgb[0] = 245;
