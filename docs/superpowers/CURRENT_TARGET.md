@@ -10,5 +10,7 @@ Current scope:
 - Home modules: reading, weather, calendar, English, settings, and about.
 - Reader-first simulator and firmware skeleton.
 - SDL and PPM simulators share the same app state and renderer as the ESP32 firmware.
+- Reader book metadata and page text flow through `src/app/reader_library.*`; current pages are generated from source text strings, and the same boundary will later be backed by SD/TXT parsing.
+- Source text supports both explicit form-feed page breaks and automatic UTF-8-safe page splitting.
 
 Obsolete historical plans for the former small-format color-accent simulator have been removed from the current docs tree so new work follows this target.

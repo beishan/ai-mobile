@@ -1,10 +1,10 @@
 #include "app/app_state.h"
+#include "app/reader_library.h"
 
 #include <stddef.h>
 
 #define HOME_ITEM_COUNT 6
 #define READER_MENU_COUNT 4
-#define READER_CATALOG_COUNT 3
 #define WEATHER_CITY_COUNT 3
 #define CALENDAR_DAYS_IN_MONTH 30
 #define SETTINGS_COUNT 6
@@ -49,7 +49,7 @@ static int clamp_page(int page, int total) {
 
 static int chapter_page_for_selection(const app_state_t *app, int selection) {
     int total = app->book_pages[app->current_book];
-    int page = selection * 2;
+    int page = reader_library_chapter_page(app->current_book, selection);
     return clamp_page(page, total);
 }
 
@@ -87,10 +87,8 @@ void app_init(app_state_t *app) {
     app->bookshelf_selection = 0;
     app->current_book = 0;
     app->recent_book = -1;
-    app->book_pages[0] = 5;
-    app->book_pages[1] = 4;
-    app->book_pages[2] = 3;
     for (int i = 0; i < APP_BOOK_COUNT; i++) {
+        app->book_pages[i] = reader_library_page_count(i);
         app->book_current_pages[i] = 0;
         app->book_bookmark_pages[i] = -1;
     }
@@ -152,9 +150,9 @@ static void handle_reader(app_state_t *app, app_button_t button) {
     if (app->reader_menu_open) {
         if (app->reader_catalog_open) {
             if (button == APP_BUTTON_UP) {
-                app->reader_catalog_selection = wrap_index(app->reader_catalog_selection - 1, READER_CATALOG_COUNT);
+                app->reader_catalog_selection = wrap_index(app->reader_catalog_selection - 1, reader_library_chapter_count(app->current_book));
             } else if (button == APP_BUTTON_DOWN) {
-                app->reader_catalog_selection = wrap_index(app->reader_catalog_selection + 1, READER_CATALOG_COUNT);
+                app->reader_catalog_selection = wrap_index(app->reader_catalog_selection + 1, reader_library_chapter_count(app->current_book));
             } else if (button == APP_BUTTON_POWER) {
                 app->reader_catalog_open = 0;
             } else if (button == APP_BUTTON_HOME) {

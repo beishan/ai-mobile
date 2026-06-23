@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "app/app_state.h"
+#include "app/reader_library.h"
 #include "font/font.h"
 #include "gfx/gfx.h"
 #include "platform/sim_display.h"
@@ -52,6 +53,7 @@ int main(void) {
     font_t font;
     char line[32];
 
+    (void)reader_library_load_book_file(0, "assets/books/santi.txt");
     app_init(&app);
     gfx_init(&fb);
     if (!font_load_default(&font)) {

@@ -1,6 +1,7 @@
 .worktrees/
 .DS_Store
 .vscode/
+.codegraph/
 build/
 out/
 .pio/

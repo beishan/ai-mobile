@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "app/app_state.h"
+#include "app/reader_library.h"
 #include "font/font.h"
 #include "gfx/gfx.h"
 #include "platform/epd_frame.h"
@@ -24,6 +25,29 @@ static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
         }
     }
     return count;
+}
+
+static int count_color_in_region(const gfx_framebuffer_t *fb, gfx_color_t color, int x, int y, int w, int h) {
+    int count = 0;
+    for (int py = y; py < y + h; py++) {
+        for (int px = x; px < x + w; px++) {
+            if (gfx_get_pixel(fb, px, py) == color) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+static int has_solid_black_block(const gfx_framebuffer_t *fb, int x, int y, int w, int h, int block_size) {
+    for (int py = y; py <= y + h - block_size; py++) {
+        for (int px = x; px <= x + w - block_size; px++) {
+            if (count_color_in_region(fb, GFX_BLACK, px, py, block_size, block_size) == block_size * block_size) {
+                return 1;
+            }
+        }
+    }
+    return 0;
 }
 
 static int file_contains(const char *path, const char *needle) {
@@ -154,6 +178,65 @@ static void test_home_has_six_modules_and_no_game(void) {
     ASSERT_TRUE(strcmp("unknown", app_page_name((app_page_t)99)) == 0);
 }
 
+static void test_home_selection_uses_outline_frame_and_larger_icon(void) {
+    gfx_framebuffer_t fb;
+    app_state_t app;
+    font_t font;
+
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    gfx_init(&fb);
+    app_init(&app);
+    app.page = APP_PAGE_HOME;
+    app.home_selection = 0;
+    ui_render_page(&fb, &app, &font);
+
+    /* tile 0 sits at (PAGE_MARGIN_X=24, BODY_TOP=40); rounded outline frame
+     * around it with a large icon centered inside. */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 16, 40));   /* outside left of frame */
+    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 24, 80));   /* left edge of frame */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 120, 52));  /* inside frame, above icon */
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 80, 64, 72, 72) > 220);
+    font_free(&font);
+}
+
+static void test_home_icons_use_modern_line_style_without_large_solid_blocks(void) {
+    ui_icon_kind_t icons[] = {
+        UI_ICON_READER,
+        UI_ICON_WEATHER,
+        UI_ICON_CALENDAR,
+        UI_ICON_ENGLISH,
+        UI_ICON_SETTINGS,
+        UI_ICON_ABOUT
+    };
+    for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++) {
+        gfx_framebuffer_t fb;
+        gfx_init(&fb);
+        ui_draw_icon(&fb, icons[i], 10, 10, 0);
+        ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 10, 10, 64, 64) > 120);
+        ASSERT_TRUE(!has_solid_black_block(&fb, 10, 10, 64, 64, 14));
+    }
+}
+
+static void test_home_status_bar_content_is_vertically_centered(void) {
+    gfx_framebuffer_t fb;
+    app_state_t app;
+    font_t font;
+
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    gfx_init(&fb);
+    app_init(&app);
+    app.page = APP_PAGE_HOME;
+    ui_render_page(&fb, &app, &font);
+
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 8, 4, 180, 1) == 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 8, 16, 180, 1) > 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 0, 1, GFX_WIDTH, 2) == 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 0, 21, GFX_WIDTH, 2) == 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 8, 6, 180, 12) > 20);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, GFX_WIDTH - 90, 6, 80, 12) > 20);
+    font_free(&font);
+}
+
 static void test_bookshelf_and_reader_keep_progress(void) {
     app_state_t app;
     app_init(&app);
@@ -172,6 +255,119 @@ static void test_bookshelf_and_reader_keep_progress(void) {
     ASSERT_EQ_INT(APP_PAGE_BOOKSHELF, app.page);
     app_handle_button(&app, APP_BUTTON_HOME);
     ASSERT_EQ_INT(1, app.reader_page);
+}
+
+static void test_bookshelf_renders_as_single_line_list_without_item_frames(void) {
+    gfx_framebuffer_t fb;
+    app_state_t app;
+    font_t font;
+
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    gfx_init(&fb);
+    app_init(&app);
+    app.page = APP_PAGE_BOOKSHELF;
+    app.bookshelf_selection = -1;
+    ui_render_page(&fb, &app, &font);
+
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 44));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 388, 44));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 116));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 388, 116));
+    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 24, 44));
+    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 36, 65));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 24, 68));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 46, 70));
+    ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 50);
+    font_free(&font);
+}
+
+static void test_bookshelf_selection_uses_rounded_outline_frame(void) {
+    gfx_framebuffer_t fb;
+    app_state_t app;
+    font_t font;
+
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    gfx_init(&fb);
+    app_init(&app);
+    app.page = APP_PAGE_BOOKSHELF;
+    app.bookshelf_selection = 1;
+    ui_render_page(&fb, &app, &font);
+
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 78));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 467, 78));
+    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 18, 78));
+    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 12, 84));
+    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 465, 108));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 240, 92));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 44));
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 388, 44));
+    font_free(&font);
+}
+
+static void test_reader_library_exposes_books_and_pages(void) {
+    const reader_book_t *book = reader_library_book(0);
+    const char *page0 = reader_library_page_text(0, 0);
+    const char *page1 = reader_library_page_text(0, 1);
+    const char *missing_book = reader_library_page_text(99, 0);
+    const char *missing_page = reader_library_page_text(0, 99);
+
+    ASSERT_EQ_INT(APP_BOOK_COUNT, reader_library_book_count());
+    ASSERT_TRUE(book != NULL);
+    ASSERT_TRUE(strcmp("三体", book->title) == 0);
+    ASSERT_TRUE(strcmp("刘慈欣", book->author) == 0);
+    ASSERT_TRUE(strcmp("1.2MB", book->size_label) == 0);
+    ASSERT_TRUE(strcmp("TXT", book->file_type) == 0);
+    ASSERT_TRUE(reader_library_page_count(0) >= 5);
+    ASSERT_TRUE(page0 != NULL);
+    ASSERT_TRUE(page1 != NULL);
+    ASSERT_TRUE(strstr(page0, "第三章") != NULL);
+    ASSERT_TRUE(strcmp(page0, page1) != 0);
+    ASSERT_TRUE(missing_book != NULL);
+    ASSERT_TRUE(missing_page != NULL);
+    ASSERT_TRUE(strcmp("", missing_book) == 0);
+    ASSERT_TRUE(strcmp("", missing_page) == 0);
+}
+
+static void test_app_init_uses_reader_library_page_counts(void) {
+    app_state_t app;
+    app_init(&app);
+    for (int i = 0; i < APP_BOOK_COUNT; i++) {
+        ASSERT_EQ_INT(reader_library_page_count(i), app.book_pages[i]);
+    }
+}
+
+static void test_reader_library_builds_pages_from_source_text(void) {
+    ASSERT_TRUE(reader_library_source_text(0) != NULL);
+    ASSERT_TRUE(strstr(reader_library_source_text(0), "\f") != NULL);
+    ASSERT_EQ_INT(5, reader_library_page_count(0));
+    ASSERT_TRUE(strstr(reader_library_page_text(0, 0), "\f") == NULL);
+    ASSERT_TRUE(strstr(reader_library_page_text(0, 1), "叶文洁") != NULL);
+    ASSERT_TRUE(strstr(reader_library_page_text(0, 4), "天色微亮") != NULL);
+}
+
+static void test_reader_library_loads_source_text_from_file(void) {
+    app_state_t app;
+    ASSERT_EQ_INT(0, reader_library_load_book_file(0, "assets/books/santi.txt"));
+    ASSERT_EQ_INT(3, reader_library_page_count(0));
+    ASSERT_TRUE(strstr(reader_library_source_text(0), "assets/books/santi.txt") != NULL);
+    ASSERT_TRUE(strstr(reader_library_page_text(0, 0), "来自文件的第一页") != NULL);
+    ASSERT_TRUE(strstr(reader_library_page_text(0, 1), "第二页来自") != NULL);
+    ASSERT_TRUE(strstr(reader_library_page_text(0, 2), "第三页用于验证") != NULL);
+    app_init(&app);
+    ASSERT_EQ_INT(3, app.book_pages[0]);
+    ASSERT_EQ_INT(-1, reader_library_load_book_file(0, "assets/books/missing.txt"));
+}
+
+static void test_reader_library_auto_paginates_plain_text_file(void) {
+    ASSERT_EQ_INT(0, reader_library_load_book_file(1, "assets/books/auto_page.txt"));
+    ASSERT_TRUE(strstr(reader_library_source_text(1), "\f") == NULL);
+    ASSERT_TRUE(reader_library_page_count(1) > 1);
+    ASSERT_TRUE(strlen(reader_library_page_text(1, 0)) < 256);
+    ASSERT_TRUE(strlen(reader_library_page_text(1, 1)) < 256);
+    ASSERT_TRUE(strstr(reader_library_page_text(1, 0), "自动分页第一页开始") != NULL);
+    ASSERT_TRUE(strlen(reader_library_page_text(1, 1)) > 0);
+    ASSERT_TRUE(strcmp(reader_library_page_text(1, 0), reader_library_page_text(1, 1)) != 0);
+    ASSERT_TRUE((reader_library_page_text(1, 1)[0] & 0xc0) != 0x80);
 }
 
 static void test_sdl_key_mapping_for_core_buttons(void) {
@@ -215,6 +411,23 @@ static void test_primary_pages_render_nonblank(void) {
     font_free(&font);
 }
 
+static void test_reader_body_renders_text_in_content_area(void) {
+    gfx_framebuffer_t fb;
+    app_state_t app;
+    font_t font;
+
+    ASSERT_EQ_INT(1, font_load_default(&font));
+    gfx_init(&fb);
+    app_init(&app);
+    app.page = APP_PAGE_READER;
+    app.reader_page = 0;
+    ui_render_page(&fb, &app, &font);
+
+    /* The reader renders body text in a box at (24, 46, 352, 154). */
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 40, 50, 300, 140) > 0);
+    font_free(&font);
+}
+
 int main(void) {
     test_framebuffer_has_ssd677_size();
     test_set_pixel_clips_out_of_bounds();
@@ -224,10 +437,21 @@ int main(void) {
     test_target_documents_reference_ssd677_and_no_game_module();
     test_esp_project_targets_ssd677_bw_panel();
     test_home_has_six_modules_and_no_game();
+    test_home_selection_uses_outline_frame_and_larger_icon();
+    test_home_icons_use_modern_line_style_without_large_solid_blocks();
+    test_home_status_bar_content_is_vertically_centered();
     test_bookshelf_and_reader_keep_progress();
+    test_bookshelf_renders_as_single_line_list_without_item_frames();
+    test_bookshelf_selection_uses_rounded_outline_frame();
+    test_reader_library_exposes_books_and_pages();
+    test_app_init_uses_reader_library_page_counts();
+    test_reader_library_builds_pages_from_source_text();
+    test_reader_library_loads_source_text_from_file();
+    test_reader_library_auto_paginates_plain_text_file();
     test_sdl_key_mapping_for_core_buttons();
     test_icons_draw_black_pixels_only();
     test_primary_pages_render_nonblank();
+    test_reader_body_renders_text_in_content_area();
     puts("tests passed");
     return 0;
 }

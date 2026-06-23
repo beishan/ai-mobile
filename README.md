@@ -53,7 +53,7 @@ The headless simulator writes the latest 480 x 800 frame to `out/frame.ppm`.
 
 - Home: six app entries, `阅读 / 天气 / 日历 / 英语 / 设置 / 关于`.
 - Bookshelf: mock books with per-book progress, recent marker, and bookmark state.
-- Reader: page turning, reader menu, catalog overlay, bookmark action, font size and line spacing settings.
+- Reader: shared content catalog, source-text backed page cache, page turning, reader menu, catalog overlay, bookmark action, font size and line spacing settings.
 - Weather: mock city switching, refresh state, WiFi/offline cache behavior.
 - Calendar: month switching and selected-day detail strip.
 - English: front/back word card, known/review counts, answer-state dots.
@@ -88,6 +88,9 @@ Hardware status:
 - `src/platform/epd_frame.c` packs the shared framebuffer into a single 48,000-byte black/white 1bpp plane.
 - `src/platform/esp_display.c` initializes GPIO/SPI primitives and logs packed SSD677 black/white frame statistics.
 - `src/platform/esp_input.c` polls POWER/UP/HOME/DOWN and routes events through the shared app state.
+- `src/app/reader_library.c` is the current source-text catalog used by both the bookshelf and reader; it builds page text from source strings and is the handoff point for later SD/TXT ingestion.
+- The desktop simulators try to load `assets/books/santi.txt` at startup and fall back to built-in source text if the file is missing.
+- Text sources may use form-feed (`\f`) for explicit page breaks; plain text without page breaks is split automatically on UTF-8-safe boundaries.
 - The exact SSD677 init, LUT/waveform, update, and sleep command sequence still needs to be filled in against the panel vendor datasheet.
 
 Current E-Ink wiring:

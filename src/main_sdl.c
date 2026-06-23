@@ -4,6 +4,7 @@
 #include <SDL.h>
 
 #include "app/app_state.h"
+#include "app/reader_library.h"
 #include "font/font.h"
 #include "gfx/gfx.h"
 #include "platform/sdl_display.h"
@@ -25,6 +26,7 @@ int main(int argc, char **argv) {
     font_t font;
     sdl_display_t display;
 
+    (void)reader_library_load_book_file(0, "assets/books/santi.txt");
     app_init(&app);
     gfx_init(&fb);
     if (!font_load_default(&font)) {

@@ -3,6 +3,7 @@ idf_component_register(
         "main_esp.c"
         "gfx/gfx.c"
         "app/app_state.c"
+        "app/reader_library.c"
         "ui/pages.c"
         "ui/icons.c"
         "font/font.c"
