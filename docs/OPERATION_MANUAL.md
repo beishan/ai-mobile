@@ -57,6 +57,8 @@ Button wiring:
 - `esp_display` configures CS/DC/RST as outputs, BUSY as input, and initializes the SPI bus on SCK/SDA.
 - `esp_display` provides reset, busy wait, command send, and data send primitives.
 - `platform/epd_frame` packs each rendered frame into one 48,000-byte black/white 1bpp plane.
-- `esp_input` polls POWER/UP/HOME/DOWN and routes button events into `app_handle_button`; each event re-renders and presents a new frame.
+- `esp_input` polls POWER/UP/HOME/DOWN with 60ms debounce and routes button events into `app_handle_button`; each event re-renders and presents a new frame.
+- POWER long press uses a 1200ms threshold. Firmware saves app state to NVS and requests display sleep.
+- App state persistence is backed by NVS at namespace/key `reader/app_state`; firmware restores it during boot and saves it after button events.
 - Frame presentation logs packed SSD677 black/white byte counts, black pixel counts, and checksums until the exact controller command sequence is added.
 - Physical panel refresh still needs the exact SSD677 init, window, update, waveform, and sleep sequence from the panel vendor datasheet.

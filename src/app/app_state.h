@@ -16,7 +16,8 @@ typedef enum {
     APP_BUTTON_POWER = 0,
     APP_BUTTON_UP,
     APP_BUTTON_HOME,
-    APP_BUTTON_DOWN
+    APP_BUTTON_DOWN,
+    APP_BUTTON_POWER_LONG
 } app_button_t;
 
 #define APP_BOOK_COUNT 3

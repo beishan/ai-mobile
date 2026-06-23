@@ -1,12 +1,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/app_persistence.h"
 #include "app/app_state.h"
 #include "app/reader_library.h"
 #include "font/font.h"
 #include "gfx/gfx.h"
 #include "platform/sim_display.h"
 #include "ui/pages.h"
+
+#define APP_STATE_PATH "out/app_state.txt"
 
 static int parse_button(const char *line, app_button_t *button) {
     if (line == NULL || button == NULL) {
@@ -55,6 +58,7 @@ int main(void) {
 
     (void)reader_library_load_book_file(0, "assets/books/santi.txt");
     app_init(&app);
+    (void)app_persistence_load_app_file(APP_STATE_PATH, &app);
     gfx_init(&fb);
     if (!font_load_default(&font)) {
         fputs("failed to load default font\n", stderr);
@@ -71,6 +75,7 @@ int main(void) {
     while (fgets(line, sizeof(line), stdin) != NULL) {
         app_button_t button;
         if (line[0] == 'q') {
+            (void)app_persistence_save_app_file(APP_STATE_PATH, &app);
             puts("bye");
             font_free(&font);
             return 0;
@@ -82,12 +87,14 @@ int main(void) {
         }
 
         app_handle_button(&app, button);
+        (void)app_persistence_save_app_file(APP_STATE_PATH, &app);
         if (render_and_commit(&fb, &display, &app, &font) != 0) {
             font_free(&font);
             return 1;
         }
     }
 
+    (void)app_persistence_save_app_file(APP_STATE_PATH, &app);
     font_free(&font);
     return 0;
 }

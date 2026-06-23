@@ -21,6 +21,22 @@ static const esp_button_map_t BUTTONS[ESP_INPUT_BUTTON_COUNT] = {
     {ESP_BUTTON_PIN_DOWN, APP_BUTTON_DOWN, 0, "DOWN"}
 };
 
+static int debounce_samples(void) {
+    int samples = ESP_BUTTON_DEBOUNCE_MS / ESP_BUTTON_POLL_MS;
+    if (ESP_BUTTON_DEBOUNCE_MS % ESP_BUTTON_POLL_MS != 0) {
+        samples++;
+    }
+    return samples > 1 ? samples : 1;
+}
+
+static int long_press_samples(void) {
+    int samples = ESP_BUTTON_LONG_PRESS_MS / ESP_BUTTON_POLL_MS;
+    if (ESP_BUTTON_LONG_PRESS_MS % ESP_BUTTON_POLL_MS != 0) {
+        samples++;
+    }
+    return samples > debounce_samples() ? samples : debounce_samples();
+}
+
 void esp_input_init(esp_input_t *input) {
     if (input == NULL) {
         return;
@@ -35,17 +51,19 @@ void esp_input_init(esp_input_t *input) {
             .intr_type = GPIO_INTR_DISABLE
         };
         esp_err_t err = gpio_config(&config);
-        input->armed[i] = 1;
+        input_debounce_init(&input->debounce[i], debounce_samples());
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "failed to configure %s button GPIO%d: %s",
                      BUTTONS[i].name,
                      BUTTONS[i].pin,
                      esp_err_to_name(err));
         } else {
-            ESP_LOGI(TAG, "button %s mapped to GPIO%d active_level=%d",
+            ESP_LOGI(TAG, "button %s mapped to GPIO%d active_level=%d debounce_ms=%d long_press_ms=%d",
                      BUTTONS[i].name,
                      BUTTONS[i].pin,
-                     ESP_BUTTON_ACTIVE_LEVEL);
+                     ESP_BUTTON_ACTIVE_LEVEL,
+                     ESP_BUTTON_DEBOUNCE_MS,
+                     ESP_BUTTON_LONG_PRESS_MS);
         }
     }
 }
@@ -57,13 +75,19 @@ int esp_input_poll_button(esp_input_t *input, app_button_t *button) {
 
     for (int i = 0; i < ESP_INPUT_BUTTON_COUNT; i++) {
         int pressed = gpio_get_level(BUTTONS[i].pin) == ESP_BUTTON_ACTIVE_LEVEL;
-        if (pressed && input->armed[i]) {
-            input->armed[i] = 0;
+        if (BUTTONS[i].button == APP_BUTTON_POWER) {
+            input_debounce_event_t event = input_debounce_update_hold(&input->debounce[i], pressed, long_press_samples());
+            if (event == INPUT_DEBOUNCE_LONG_PRESS) {
+                *button = APP_BUTTON_POWER_LONG;
+                return 1;
+            }
+            if (event == INPUT_DEBOUNCE_SHORT_PRESS) {
+                *button = APP_BUTTON_POWER;
+                return 1;
+            }
+        } else if (input_debounce_update(&input->debounce[i], pressed)) {
             *button = BUTTONS[i].button;
             return 1;
-        }
-        if (!pressed) {
-            input->armed[i] = 1;
         }
     }
 

@@ -3,10 +3,12 @@
 #include <string.h>
 
 #include "app/app_state.h"
+#include "app/app_persistence.h"
 #include "app/reader_library.h"
 #include "font/font.h"
 #include "gfx/gfx.h"
 #include "platform/epd_frame.h"
+#include "platform/input_debounce.h"
 #include "platform/sdl_display.h"
 #include "platform/sim_display.h"
 #include "ui/icons.h"
@@ -370,11 +372,233 @@ static void test_reader_library_auto_paginates_plain_text_file(void) {
     ASSERT_TRUE((reader_library_page_text(1, 1)[0] & 0xc0) != 0x80);
 }
 
+static void test_app_persistence_round_trips_reader_progress_and_settings(void) {
+    app_state_t app;
+    app_state_t restored;
+    app_persisted_state_t snapshot;
+    app_persisted_state_t decoded;
+    char encoded[APP_PERSISTENCE_TEXT_MAX];
+
+    app_init(&app);
+    app.current_book = 1;
+    app.recent_book = 1;
+    app.book_current_pages[0] = 2;
+    app.book_current_pages[1] = 1;
+    app.book_current_pages[2] = 2;
+    app.book_bookmark_pages[0] = -1;
+    app.book_bookmark_pages[1] = 1;
+    app.book_bookmark_pages[2] = 2;
+    app.reader_page = 1;
+    app.font_size_index = 4;
+    app.line_spacing_index = 3;
+    app.wifi_connected = 0;
+    app.weather_city_index = 2;
+    app.power_saving_enabled = 0;
+
+    app_persistence_capture(&app, &snapshot);
+    ASSERT_EQ_INT(0, app_persistence_encode(&snapshot, encoded, sizeof(encoded)));
+    ASSERT_EQ_INT(0, app_persistence_decode(encoded, &decoded));
+
+    app_init(&restored);
+    app_persistence_apply(&restored, &decoded);
+
+    ASSERT_EQ_INT(1, restored.current_book);
+    ASSERT_EQ_INT(1, restored.recent_book);
+    ASSERT_EQ_INT(2, restored.book_current_pages[0]);
+    ASSERT_EQ_INT(1, restored.book_current_pages[1]);
+    ASSERT_EQ_INT(2, restored.book_current_pages[2]);
+    ASSERT_EQ_INT(-1, restored.book_bookmark_pages[0]);
+    ASSERT_EQ_INT(1, restored.book_bookmark_pages[1]);
+    ASSERT_EQ_INT(2, restored.book_bookmark_pages[2]);
+    ASSERT_EQ_INT(1, restored.reader_page);
+    ASSERT_EQ_INT(4, restored.font_size_index);
+    ASSERT_EQ_INT(3, restored.line_spacing_index);
+    ASSERT_EQ_INT(0, restored.wifi_connected);
+    ASSERT_EQ_INT(2, restored.weather_city_index);
+    ASSERT_EQ_INT(0, restored.power_saving_enabled);
+}
+
+static void test_app_persistence_clamps_restored_values_to_current_limits(void) {
+    app_state_t app;
+    app_persisted_state_t snapshot = {
+        .version = APP_PERSISTENCE_VERSION,
+        .current_book = 99,
+        .recent_book = 99,
+        .book_current_pages = {99, -5, 99},
+        .book_bookmark_pages = {99, -5, 99},
+        .font_size_index = 99,
+        .line_spacing_index = -5,
+        .wifi_connected = 7,
+        .weather_city_index = -5,
+        .power_saving_enabled = -2
+    };
+
+    app_init(&app);
+    app_persistence_apply(&app, &snapshot);
+
+    ASSERT_EQ_INT(APP_BOOK_COUNT - 1, app.current_book);
+    ASSERT_EQ_INT(APP_BOOK_COUNT - 1, app.recent_book);
+    ASSERT_EQ_INT(app.book_pages[0] - 1, app.book_current_pages[0]);
+    ASSERT_EQ_INT(0, app.book_current_pages[1]);
+    ASSERT_EQ_INT(app.book_pages[2] - 1, app.book_current_pages[2]);
+    ASSERT_EQ_INT(app.book_pages[0] - 1, app.book_bookmark_pages[0]);
+    ASSERT_EQ_INT(-1, app.book_bookmark_pages[1]);
+    ASSERT_EQ_INT(app.book_pages[2] - 1, app.book_bookmark_pages[2]);
+    ASSERT_EQ_INT(app.book_current_pages[APP_BOOK_COUNT - 1], app.reader_page);
+    ASSERT_EQ_INT(4, app.font_size_index);
+    ASSERT_EQ_INT(0, app.line_spacing_index);
+    ASSERT_EQ_INT(1, app.wifi_connected);
+    ASSERT_EQ_INT(0, app.weather_city_index);
+    ASSERT_EQ_INT(0, app.power_saving_enabled);
+}
+
+static void test_app_persistence_rejects_malformed_payloads(void) {
+    app_persisted_state_t decoded;
+    ASSERT_EQ_INT(-1, app_persistence_decode("not a persisted app state", &decoded));
+    ASSERT_EQ_INT(-1, app_persistence_decode("AIPERSIST 99\n", &decoded));
+}
+
+static void test_app_persistence_saves_and_loads_text_file(void) {
+    app_persisted_state_t snapshot = {
+        .version = APP_PERSISTENCE_VERSION,
+        .current_book = 2,
+        .recent_book = 2,
+        .book_current_pages = {1, 0, 2},
+        .book_bookmark_pages = {-1, 0, 2},
+        .font_size_index = 3,
+        .line_spacing_index = 1,
+        .wifi_connected = 1,
+        .weather_city_index = 2,
+        .power_saving_enabled = 0
+    };
+    app_persisted_state_t loaded;
+
+    ASSERT_EQ_INT(0, app_persistence_save_file("out/test_app_state.txt", &snapshot));
+    ASSERT_EQ_INT(0, app_persistence_load_file("out/test_app_state.txt", &loaded));
+    ASSERT_EQ_INT(2, loaded.current_book);
+    ASSERT_EQ_INT(2, loaded.recent_book);
+    ASSERT_EQ_INT(1, loaded.book_current_pages[0]);
+    ASSERT_EQ_INT(2, loaded.book_current_pages[2]);
+    ASSERT_EQ_INT(-1, loaded.book_bookmark_pages[0]);
+    ASSERT_EQ_INT(2, loaded.book_bookmark_pages[2]);
+    ASSERT_EQ_INT(3, loaded.font_size_index);
+    ASSERT_EQ_INT(1, loaded.line_spacing_index);
+    ASSERT_EQ_INT(1, loaded.wifi_connected);
+    ASSERT_EQ_INT(2, loaded.weather_city_index);
+    ASSERT_EQ_INT(0, loaded.power_saving_enabled);
+    ASSERT_EQ_INT(-1, app_persistence_load_file("out/missing_app_state.txt", &loaded));
+}
+
+static void test_app_persistence_saves_and_loads_app_state_file(void) {
+    app_state_t app;
+    app_state_t restored;
+
+    app_init(&app);
+    app.current_book = 1;
+    app.recent_book = 1;
+    app.book_current_pages[1] = 2;
+    app.book_bookmark_pages[1] = 2;
+    app.reader_page = 2;
+    app.font_size_index = 4;
+    app.line_spacing_index = 3;
+    app.wifi_connected = 0;
+    app.weather_city_index = 2;
+    app.power_saving_enabled = 0;
+
+    ASSERT_EQ_INT(0, app_persistence_save_app_file("out/test_live_app_state.txt", &app));
+
+    app_init(&restored);
+    ASSERT_EQ_INT(0, app_persistence_load_app_file("out/test_live_app_state.txt", &restored));
+    ASSERT_EQ_INT(1, restored.current_book);
+    ASSERT_EQ_INT(1, restored.recent_book);
+    ASSERT_EQ_INT(2, restored.book_current_pages[1]);
+    ASSERT_EQ_INT(2, restored.book_bookmark_pages[1]);
+    ASSERT_EQ_INT(2, restored.reader_page);
+    ASSERT_EQ_INT(4, restored.font_size_index);
+    ASSERT_EQ_INT(3, restored.line_spacing_index);
+    ASSERT_EQ_INT(0, restored.wifi_connected);
+    ASSERT_EQ_INT(2, restored.weather_city_index);
+    ASSERT_EQ_INT(0, restored.power_saving_enabled);
+}
+
+static void test_app_persistence_nvs_backend_is_stubbed_on_host(void) {
+    app_state_t app;
+    app_init(&app);
+    ASSERT_EQ_INT(-1, app_persistence_save_nvs("reader", "app_state", &app));
+    ASSERT_EQ_INT(-1, app_persistence_load_nvs("reader", "app_state", &app));
+}
+
+static void test_esp_firmware_wires_app_persistence_to_nvs(void) {
+    ASSERT_TRUE(file_contains("src/main_esp.c", "nvs_flash_init"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "app_persistence_load_nvs"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "app_persistence_save_nvs"));
+    ASSERT_TRUE(file_contains("src/CMakeLists.txt", "nvs_flash"));
+}
+
+static void test_esp_input_wires_button_debounce(void) {
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BUTTON_DEBOUNCE_MS 60"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BUTTON_LONG_PRESS_MS 1200"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "input_debounce_update"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "APP_BUTTON_POWER_LONG"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "esp_display_sleep"));
+    ASSERT_TRUE(file_contains("src/CMakeLists.txt", "platform/input_debounce.c"));
+}
+
 static void test_sdl_key_mapping_for_core_buttons(void) {
     ASSERT_EQ_INT(APP_BUTTON_UP, sdl_display_button_from_key(SDLK_UP));
     ASSERT_EQ_INT(APP_BUTTON_DOWN, sdl_display_button_from_key(SDLK_s));
     ASSERT_EQ_INT(APP_BUTTON_HOME, sdl_display_button_from_key(SDLK_RETURN));
     ASSERT_EQ_INT(APP_BUTTON_POWER, sdl_display_button_from_key(SDLK_BACKSPACE));
+}
+
+static void test_input_debounce_emits_once_after_stable_press(void) {
+    input_debounce_t debounce;
+    input_debounce_init(&debounce, 3);
+
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 0));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(1, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+}
+
+static void test_input_debounce_rearms_after_stable_release(void) {
+    input_debounce_t debounce;
+    input_debounce_init(&debounce, 2);
+
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(1, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 0));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 0));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 0));
+    ASSERT_EQ_INT(0, input_debounce_update(&debounce, 1));
+    ASSERT_EQ_INT(1, input_debounce_update(&debounce, 1));
+}
+
+static void test_input_debounce_short_press_emits_on_release(void) {
+    input_debounce_t debounce;
+    input_debounce_init(&debounce, 2);
+
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 1, 5));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 1, 5));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 0, 5));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_SHORT_PRESS, input_debounce_update_hold(&debounce, 0, 5));
+}
+
+static void test_input_debounce_long_press_emits_once_while_held(void) {
+    input_debounce_t debounce;
+    input_debounce_init(&debounce, 2);
+
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 1, 3));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 1, 3));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_LONG_PRESS, input_debounce_update_hold(&debounce, 1, 3));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 1, 3));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 0, 3));
+    ASSERT_EQ_INT(INPUT_DEBOUNCE_NONE, input_debounce_update_hold(&debounce, 0, 3));
 }
 
 static void test_icons_draw_black_pixels_only(void) {
@@ -448,7 +672,19 @@ int main(void) {
     test_reader_library_builds_pages_from_source_text();
     test_reader_library_loads_source_text_from_file();
     test_reader_library_auto_paginates_plain_text_file();
+    test_app_persistence_round_trips_reader_progress_and_settings();
+    test_app_persistence_clamps_restored_values_to_current_limits();
+    test_app_persistence_rejects_malformed_payloads();
+    test_app_persistence_saves_and_loads_text_file();
+    test_app_persistence_saves_and_loads_app_state_file();
+    test_app_persistence_nvs_backend_is_stubbed_on_host();
+    test_esp_firmware_wires_app_persistence_to_nvs();
+    test_esp_input_wires_button_debounce();
     test_sdl_key_mapping_for_core_buttons();
+    test_input_debounce_emits_once_after_stable_press();
+    test_input_debounce_rearms_after_stable_release();
+    test_input_debounce_short_press_emits_on_release();
+    test_input_debounce_long_press_emits_once_while_held();
     test_icons_draw_black_pixels_only();
     test_primary_pages_render_nonblank();
     test_reader_body_renders_text_in_content_area();

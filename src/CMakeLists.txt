@@ -3,11 +3,13 @@ idf_component_register(
         "main_esp.c"
         "gfx/gfx.c"
         "app/app_state.c"
+        "app/app_persistence.c"
         "app/reader_library.c"
         "ui/pages.c"
         "ui/icons.c"
         "font/font.c"
         "platform/epd_frame.c"
+        "platform/input_debounce.c"
         "platform/esp_display.c"
         "platform/esp_input.c"
     INCLUDE_DIRS
@@ -18,4 +20,5 @@ idf_component_register(
         esp_driver_spi
         freertos
         log
+        nvs_flash
 )

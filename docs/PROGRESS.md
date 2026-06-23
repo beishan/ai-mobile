@@ -49,6 +49,21 @@ Updated: 2026-06-23
   - Settings: six rows with ~110px each, selected row uses full-width inverted bar.
   - About: title and info lines distributed across full content height with larger fonts.
 - Updated `tests/test_runner.c` pixel-coordinate assertions for the new layout and added `test_reader_body_fills_expanded_content_area`.
+- Added portable app persistence:
+  - `src/app/app_persistence.c` captures durable reader/settings state.
+  - Versioned text encode/decode for per-book current pages, bookmarks, recent book, font size, line spacing, WiFi, city, and power-saving state.
+  - Restore clamps saved values to current book page counts and setting ranges.
+  - PPM and SDL simulators load `out/app_state.txt`, save after state changes, and save again on exit.
+  - ESP32 firmware initializes NVS flash, restores `reader/app_state` on boot, and saves after button events.
+  - Tests cover round trip, clamping, malformed payload rejection, and file save/load.
+- Added ESP32 button debounce:
+  - `src/platform/input_debounce.c` provides a portable stable-sample debounce state machine.
+  - `src/platform/esp_input.c` uses a 60ms debounce window for POWER/UP/HOME/DOWN before emitting app button events.
+  - Tests cover bounce suppression, re-arm after release, and ESP wiring.
+- Added POWER long-press handling:
+  - `input_debounce_update_hold` distinguishes short press on release from long press while held.
+  - ESP32 POWER long press uses a 1200ms threshold.
+  - `main_esp.c` saves NVS state and calls `esp_display_sleep` for POWER long press.
   - `README.md`.
   - `requires01.md`.
   - `docs/OPERATION_MANUAL.md`.
@@ -62,6 +77,8 @@ Latest successful checks:
 make -B test
 make reader_sim
 make reader_sim_sdl
+./reader_sim
+pio run -e esp32-n16r8
 ```
 
 Latest test result:
@@ -72,8 +89,7 @@ tests passed
 
 ## In Progress
 
-- Real SSD677 command sequence, LUT/waveform, update trigger, and sleep behavior.
-- Persistent storage for reading progress, bookmarks, and settings.
+- Real SSD677 command sequence, LUT/waveform, update trigger, and hardware sleep command behavior.
 - Real file ingestion for TXT, including UTF-8/GBK detection and pagination, behind the `reader_library` interface.
 - Real weather/network integration.
 
