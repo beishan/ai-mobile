@@ -115,3 +115,32 @@ void gfx_draw_text(gfx_framebuffer_t *fb, int x, int y, const char *text, int sc
         cursor_x += 7 * s;
     }
 }
+
+void gfx_draw_bitmap(gfx_framebuffer_t *fb, const uint8_t *data, int data_len,
+                     int stride, int x, int y, int w, int h, gfx_color_t color) {
+    if (fb == NULL || data == NULL || w <= 0 || h <= 0 || stride <= 0) {
+        return;
+    }
+
+    for (int row = 0; row < h; row++) {
+        int py = y + row;
+        if (py < 0 || py >= GFX_HEIGHT) {
+            continue;
+        }
+        int row_offset = row * stride;
+        for (int col = 0; col < w; col++) {
+            int px = x + col;
+            if (px < 0 || px >= GFX_WIDTH) {
+                continue;
+            }
+            int byte_idx = row_offset + (col / 8);
+            if (byte_idx >= data_len) {
+                break;
+            }
+            int bit = 7 - (col % 8);
+            if (data[byte_idx] & (1 << bit)) {
+                fb->pixels[py][px] = (uint8_t)color;
+            }
+        }
+    }
+}

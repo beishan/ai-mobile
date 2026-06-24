@@ -25,4 +25,20 @@ void gfx_fill_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_
 void gfx_draw_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_t color);
 void gfx_draw_text(gfx_framebuffer_t *fb, int x, int y, const char *text, int scale, gfx_color_t color);
 
+/**
+ * Draw a 1-bpp bitmap onto the framebuffer.
+ *
+ * @param fb       The framebuffer to draw into.
+ * @param data     Pointer to 1-bpp bitmap data (MSB first within each byte).
+ * @param data_len Total number of bytes in the bitmap data.
+ * @param stride   Number of bytes per row in the bitmap data.
+ * @param x        Top-left X position on the framebuffer.
+ * @param y        Top-left Y position on the framebuffer.
+ * @param w        Width of the bitmap in pixels.
+ * @param h        Height of the bitmap in pixels.
+ * @param color    Color for set bits (unset bits are left unchanged / transparent).
+ */
+void gfx_draw_bitmap(gfx_framebuffer_t *fb, const uint8_t *data, int data_len,
+                     int stride, int x, int y, int w, int h, gfx_color_t color);
+
 #endif

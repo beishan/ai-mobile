@@ -3,6 +3,7 @@
 #include "app/reader_library.h"
 
 #include <stdio.h>
+#include <stddef.h>
 
 #define STATUS_BAR_HEIGHT 24
 
@@ -54,17 +55,89 @@ static void home_status_bar(gfx_framebuffer_t *fb, const font_t *font) {
     font_draw_text(small, fb, GFX_WIDTH - 36, text_y, "78%", GFX_WHITE);
 }
 
+/* Info card shown above the app grid on the home screen.
+ * Bordered card split by a vertical divider: left = weather,
+ * right = large clock. */
+static void home_info_card(gfx_framebuffer_t *fb, const app_state_t *app, int x, int y, int w, int h) {
+    const font_face_t *small = font_get_face(FONT_SIZE_14);
+    const font_face_t *city_font = font_get_face(FONT_SIZE_16);
+    const font_face_t *temp_font = font_get_face(FONT_SIZE_22);
+    const font_face_t *clock_font = font_get_face(FONT_SIZE_24);
+
+    const char *cities[] = {"北京", "上海", "广州"};
+    const char *conditions[] = {"晴", "雨", "云"};
+    const int temps[] = {26, 22, 29};
+    int city = app->weather_city_index;
+    if (city < 0 || city > 2) {
+        city = 0;
+    }
+
+    /* Outer border */
+    gfx_draw_rect(fb, x, y, w, h, GFX_BLACK);
+
+    /* Vertical divider — left ~60%, right ~40% */
+    int divider_x = x + w * 3 / 5;
+    gfx_fill_rect(fb, divider_x, y + 8, 1, h - 16, GFX_BLACK);
+
+    /* --- Left: weather --- */
+    /* Sun icon: hollow disc outline drawn pixel-by-pixel (Bresenham circle, r=8) + rays. */
+    int icon_cx = x + 30;
+    int icon_cy = y + h / 2;
+    {
+        int r = 8;
+        int cx = 0, cy = r;
+        int d = 3 - 2 * r;
+        while (cx <= cy) {
+            int pts[][2] = {
+                {icon_cx + cx, icon_cy + cy}, {icon_cx - cx, icon_cy + cy},
+                {icon_cx + cx, icon_cy - cy}, {icon_cx - cx, icon_cy - cy},
+                {icon_cx + cy, icon_cy + cx}, {icon_cx - cy, icon_cy + cx},
+                {icon_cx + cy, icon_cy - cx}, {icon_cx - cy, icon_cy - cx},
+            };
+            for (size_t k = 0; k < sizeof(pts) / sizeof(pts[0]); k++) {
+                gfx_set_pixel(fb, pts[k][0], pts[k][1], GFX_BLACK);
+            }
+            if (d < 0) {
+                d += 4 * cx + 6;
+            } else {
+                d += 4 * (cx - cy) + 10;
+                cy--;
+            }
+            cx++;
+        }
+        /* Rays (4 cardinal + 4 diagonal) */
+        gfx_fill_rect(fb, icon_cx - 1, icon_cy - 12, 2, 2, GFX_BLACK);
+        gfx_fill_rect(fb, icon_cx - 1, icon_cy + 10, 2, 2, GFX_BLACK);
+        gfx_fill_rect(fb, icon_cx - 12, icon_cy - 1, 2, 2, GFX_BLACK);
+        gfx_fill_rect(fb, icon_cx + 10, icon_cy - 1, 2, 2, GFX_BLACK);
+    }
+
+    /* Weather text to the right of the icon */
+    int text_x = icon_cx + 16;
+    char temp_str[16];
+    snprintf(temp_str, sizeof(temp_str), "%dC %s", temps[city], conditions[city]);
+    font_draw_text(temp_font, fb, text_x, icon_cy - temp_font->size + 2, temp_str, GFX_BLACK);
+    font_draw_text(city_font, fb, text_x, icon_cy + 6, cities[city], GFX_BLACK);
+
+    /* --- Right: large clock --- */
+    const char *clock_text = "14:35";
+    font_draw_text_aligned(clock_font, fb, divider_x, y + (h - clock_font->size) / 2 - 4,
+                            w - (divider_x - x), clock_text, FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned(small, fb, divider_x, y + (h - clock_font->size) / 2 + clock_font->size,
+                            w - (divider_x - x), "星期三", FONT_ALIGN_CENTER, GFX_BLACK);
+}
+
 static void app_tile(gfx_framebuffer_t *fb, const font_t *font, ui_icon_kind_t icon, int x, int y, int w, int h, const char *label, int selected) {
     const font_face_t *label_font = font_get_face(FONT_SIZE_18);
-    int icon_size = 64;
+    int icon_size = 48;
     int icon_x = x + (w - icon_size) / 2;
-    int icon_y = y + 24;
+    int icon_y = y + (h - icon_size - 28) / 2;
     (void)font;
     if (selected) {
         draw_rounded_rect(fb, x, y, w, h, GFX_BLACK);
     }
     ui_draw_icon(fb, icon, icon_x, icon_y, 0);
-    font_draw_text_aligned(label_font, fb, x, y + h - 40, w, label, FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned(label_font, fb, x, icon_y + icon_size + 8, w, label, FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
@@ -77,20 +150,36 @@ static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const fon
         UI_ICON_SETTINGS,
         UI_ICON_ABOUT
     };
-    /* 3 rows x 2 columns portrait grid filling the content area. */
-    const int cols = 2;
-    const int rows = 3;
-    const int gap = 24;
-    const int tile_w = (CONTENT_WIDTH - gap) / cols;
-    const int tile_h = (BODY_HEIGHT - gap * (rows - 1)) / rows;
 
     home_status_bar(fb, font);
+
+    /* Info card above the grid: weather + clock */
+    const int card_margin = PAGE_MARGIN_X;
+    const int card_w = GFX_WIDTH - 2 * card_margin;
+    const int card_h = 96;
+    const int card_x = card_margin;
+    const int card_y = BODY_TOP + 8;
+    home_info_card(fb, app, card_x, card_y, card_w, card_h);
+
+    /* 3 columns x 2 rows grid, centered below the info card, NOT filling the screen. */
+    const int cols = 3;
+    const int rows = 2;
+    const int gap = 24;
+    const int tile_w = 108;
+    const int tile_h = 96;
+    const int total_w = cols * tile_w + (cols - 1) * gap;
+    const int total_h = rows * tile_h + (rows - 1) * gap;
+    const int grid_top = card_y + card_h + 24;
+    const int grid_bottom = BODY_BOTTOM;
+    const int grid_avail = grid_bottom - grid_top;
+    const int start_x = (GFX_WIDTH - total_w) / 2;
+    const int start_y = grid_top + (grid_avail - total_h) / 2;
 
     for (int i = 0; i < 6; i++) {
         int col = i % cols;
         int row = i / cols;
-        int x = PAGE_MARGIN_X + col * (tile_w + gap);
-        int y = BODY_TOP + row * (tile_h + gap);
+        int x = start_x + col * (tile_w + gap);
+        int y = start_y + row * (tile_h + gap);
         app_tile(fb, font, icons[i], x, y, tile_w, tile_h, items[i], app->home_selection == i);
     }
 }
