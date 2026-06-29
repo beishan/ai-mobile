@@ -102,6 +102,7 @@ void app_init(app_state_t *app) {
     app->weather_city_index = 0;
     app->weather_stale = 0;
     app->weather_last_updated_minutes = 15;
+    app->weather_type = 0; /* sunny - default */
     app->calendar_month_offset = 0;
     app->calendar_selected_day = 15;
     app->calendar_detail_open = 0;

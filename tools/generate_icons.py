@@ -31,10 +31,15 @@ ICON_NAMES = [
     "english",
     "settings",
     "about",
+    # Weather condition icons
+    "weather_sunny",
+    "weather_cloudy",
+    "weather_rainy",
+    "weather_snowy",
 ]
 
 ICON_DIR = Path("assets/icons")
-DEFAULT_SIZE = 64
+DEFAULT_SIZE = 52
 
 
 def load_and_convert(path: Path, target_size: int) -> list[list[int]]:

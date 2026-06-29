@@ -9,7 +9,12 @@ typedef enum {
     UI_ICON_CALENDAR,
     UI_ICON_ENGLISH,
     UI_ICON_SETTINGS,
-    UI_ICON_ABOUT
+    UI_ICON_ABOUT,
+    /* Weather condition icons */
+    UI_ICON_SUNNY,
+    UI_ICON_CLOUDY,
+    UI_ICON_RAINY,
+    UI_ICON_SNOWY
 } ui_icon_kind_t;
 
 void ui_draw_icon(gfx_framebuffer_t *fb, ui_icon_kind_t kind, int x, int y, int selected);

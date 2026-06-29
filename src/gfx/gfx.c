@@ -83,6 +83,118 @@ void gfx_draw_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_
     gfx_fill_rect(fb, x + w - 1, y, 1, h, color);
 }
 
+/* Integer square root (Newton's method) — avoids floating-point on embedded targets */
+static int isqrt_int(int n) {
+    if (n <= 0) return 0;
+    if (n == 1) return 1;
+    int x = n;
+    int y = (x + 1) / 2;
+    while (y < x) {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    return x;
+}
+
+void gfx_fill_rounded_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, int radius, gfx_color_t color) {
+    if (w <= 0 || h <= 0) return;
+
+    int max_radius = (w < h ? w : h) / 2;
+    if (radius > max_radius) radius = max_radius;
+    if (radius < 0) radius = 0;
+
+    if (radius == 0) {
+        gfx_fill_rect(fb, x, y, w, h, color);
+        return;
+    }
+
+    int r = radius;
+
+    /* Fill the middle section (straight sides, full width) */
+    int mid_y0 = y + r;
+    int mid_y1 = y + h - r;
+    if (mid_y1 > mid_y0) {
+        gfx_fill_rect(fb, x, mid_y0, w, mid_y1 - mid_y0, color);
+    }
+
+    /*
+     * Fill corner rows using the circle equation.
+     * For a corner at offset dy from the top/bottom edge, the horizontal
+     * half-width from the corner centre is: dx = sqrt(r^2 - (r-dy)^2).
+     * The span on that row goes from (x + r - dx) to (x + w-1 - r + dx).
+     */
+    for (int dy = 0; dy < r; dy++) {
+        int dist_y = r - dy;
+        int dx = isqrt_int(r * r - dist_y * dist_y);
+        int left  = x + r - dx;
+        int right = x + w - 1 - r + dx;
+        int span_w = right - left + 1;
+        if (span_w > 0) {
+            gfx_fill_rect(fb, left, y + dy, span_w, 1, color);
+            gfx_fill_rect(fb, left, y + h - 1 - dy, span_w, 1, color);
+        }
+    }
+}
+
+void gfx_draw_rounded_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, int radius, gfx_color_t color) {
+    if (w <= 0 || h <= 0) return;
+
+    int max_radius = (w < h ? w : h) / 2;
+    if (radius > max_radius) radius = max_radius;
+    if (radius < 0) radius = 0;
+
+    /* Straight edges */
+    gfx_fill_rect(fb, x + radius, y, w - 2 * radius, 1, color);
+    gfx_fill_rect(fb, x + radius, y + h - 1, w - 2 * radius, 1, color);
+    gfx_fill_rect(fb, x, y + radius, 1, h - 2 * radius, color);
+    gfx_fill_rect(fb, x + w - 1, y + radius, 1, h - 2 * radius, color);
+
+    /* Corner arcs via integer circle equation */
+    if (radius > 0) {
+        int r = radius;
+        for (int dy = 0; dy < r; dy++) {
+            int dist_y = r - dy;
+            int dx = isqrt_int(r * r - dist_y * dist_y);
+            /* Top-left */
+            gfx_set_pixel(fb, x + r - dx, y + dy, color);
+            /* Top-right */
+            gfx_set_pixel(fb, x + w - 1 - r + dx, y + dy, color);
+            /* Bottom-left */
+            gfx_set_pixel(fb, x + r - dx, y + h - 1 - dy, color);
+            /* Bottom-right */
+            gfx_set_pixel(fb, x + w - 1 - r + dx, y + h - 1 - dy, color);
+        }
+    }
+}
+
+void gfx_draw_rounded_rect_thick(gfx_framebuffer_t *fb, int x, int y, int w, int h, int radius, int thickness, gfx_color_t color) {
+    if (w <= 0 || h <= 0 || thickness <= 0) return;
+
+    int max_radius = (w < h ? w : h) / 2;
+    if (radius > max_radius) radius = max_radius;
+    if (radius < 0) radius = 0;
+
+    /*
+     * Fill-and-subtract approach:
+     * 1. Fill the entire outer rounded rect with the border colour.
+     * 2. Fill the inner rounded rect with GFX_WHITE to carve out the centre.
+     * This produces a gap-free thick border with perfectly smooth arcs,
+     * unlike the old concentric-arc method which left holes in the corners.
+     */
+    gfx_fill_rounded_rect(fb, x, y, w, h, radius, color);
+
+    int inner_x = x + thickness;
+    int inner_y = y + thickness;
+    int inner_w = w - 2 * thickness;
+    int inner_h = h - 2 * thickness;
+    int inner_radius = radius - thickness;
+    if (inner_radius < 0) inner_radius = 0;
+
+    if (inner_w > 0 && inner_h > 0) {
+        gfx_fill_rounded_rect(fb, inner_x, inner_y, inner_w, inner_h, inner_radius, GFX_WHITE);
+    }
+}
+
 static void draw_block_char(gfx_framebuffer_t *fb, int x, int y, int scale, gfx_color_t color) {
     int s = scale <= 0 ? 1 : scale;
 

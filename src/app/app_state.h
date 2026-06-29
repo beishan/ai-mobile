@@ -42,6 +42,7 @@ typedef struct {
     int weather_city_index;
     int weather_stale;
     int weather_last_updated_minutes;
+    int weather_type; /* 0=sunny, 1=cloudy, 2=rainy, 3=snowy */
     int calendar_month_offset;
     int calendar_selected_day;
     int calendar_detail_open;

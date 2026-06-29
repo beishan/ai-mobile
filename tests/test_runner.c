@@ -271,14 +271,12 @@ static void test_bookshelf_renders_as_single_line_list_without_item_frames(void)
     app.bookshelf_selection = -1;
     ui_render_page(&fb, &app, &font);
 
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 44));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 388, 44));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 116));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 388, 116));
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 24, 44));
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 36, 65));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 24, 68));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 46, 70));
+    /* Grid layout: 3 columns x N rows. Card 0 at (x=24, y=50), card size w=128, h=220 (cover only) */
+    /* No selection frame on any card */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 22, 48));   /* outside top-left of first card cover */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 154, 48));  /* outside top-right of first card cover */
+    /* Content (large decorative character) is present in first card */
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 24, 50, 128, 220) > 50);  /* cover area has content */
     ASSERT_TRUE(count_color(&fb, GFX_BLACK) > 50);
     font_free(&font);
 }
@@ -292,17 +290,21 @@ static void test_bookshelf_selection_uses_rounded_outline_frame(void) {
     gfx_init(&fb);
     app_init(&app);
     app.page = APP_PAGE_BOOKSHELF;
-    app.bookshelf_selection = 1;
+    app.bookshelf_selection = 1;  /* Select second book (card 1) */
     ui_render_page(&fb, &app, &font);
 
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 78));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 467, 78));
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 18, 78));
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 12, 84));
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 465, 108));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 240, 92));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 12, 44));
-    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 388, 44));
+    /* Grid layout: Card 1 is at col=1, row=0 (x=176, y=50, w=128, h=220 cover) */
+    /* Selected card has thick rounded border (offset by -2, size +4): x=174, y=48, w=132, h=224, r=12 */
+    /* Outside rounded corner is white */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 172, 46));  /* outside top-left corner */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 308, 46));  /* outside top-right corner */
+    /* Top border is black (straight part of top edge) */
+    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 220, 48));  /* inside top border */
+    /* Cover area has decorative content (large character) */
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 176, 50, 128, 220) > 50);  /* cover has content */
+    /* Card 0 has no selection frame */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 22, 48));   /* outside card 0 */
+    ASSERT_EQ_INT(GFX_WHITE, gfx_get_pixel(&fb, 154, 48));  /* outside card 0 */
     font_free(&font);
 }
 
@@ -364,8 +366,8 @@ static void test_reader_library_auto_paginates_plain_text_file(void) {
     ASSERT_EQ_INT(0, reader_library_load_book_file(1, "assets/books/auto_page.txt"));
     ASSERT_TRUE(strstr(reader_library_source_text(1), "\f") == NULL);
     ASSERT_TRUE(reader_library_page_count(1) > 1);
-    ASSERT_TRUE(strlen(reader_library_page_text(1, 0)) < 256);
-    ASSERT_TRUE(strlen(reader_library_page_text(1, 1)) < 256);
+    ASSERT_TRUE(strlen(reader_library_page_text(1, 0)) < 1024);
+    ASSERT_TRUE(strlen(reader_library_page_text(1, 1)) < 1024);
     ASSERT_TRUE(strstr(reader_library_page_text(1, 0), "自动分页第一页开始") != NULL);
     ASSERT_TRUE(strlen(reader_library_page_text(1, 1)) > 0);
     ASSERT_TRUE(strcmp(reader_library_page_text(1, 0), reader_library_page_text(1, 1)) != 0);
@@ -647,8 +649,8 @@ static void test_reader_body_renders_text_in_content_area(void) {
     app.reader_page = 0;
     ui_render_page(&fb, &app, &font);
 
-    /* The reader renders body text in a box at (24, 46, 352, 154). */
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 40, 50, 300, 140) > 0);
+    /* The reader renders body text in the expanded content area (24, 48, 432, 696). */
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 40, 60, 400, 600) > 0);
     font_free(&font);
 }
 

@@ -64,6 +64,8 @@ int main(void) {
         fputs("failed to load default font\n", stderr);
         return 1;
     }
+    /* Load external bin fonts from assets/fonts/external directory */
+    font_manager_load_dir("assets/fonts/external");
     sim_display_init(&display, "out/frame.ppm");
 
     puts("reader_sim controls: w=up s=down h/enter=home p=power q=quit");
@@ -77,6 +79,7 @@ int main(void) {
         if (line[0] == 'q') {
             (void)app_persistence_save_app_file(APP_STATE_PATH, &app);
             puts("bye");
+            font_manager_free_all();
             font_free(&font);
             return 0;
         }
@@ -89,12 +92,14 @@ int main(void) {
         app_handle_button(&app, button);
         (void)app_persistence_save_app_file(APP_STATE_PATH, &app);
         if (render_and_commit(&fb, &display, &app, &font) != 0) {
+            font_manager_free_all();
             font_free(&font);
             return 1;
         }
     }
 
     (void)app_persistence_save_app_file(APP_STATE_PATH, &app);
+    font_manager_free_all();
     font_free(&font);
     return 0;
 }

@@ -11,3 +11,4 @@ reader_sim
 reader_sim_sdl
 tests/test_runner
 assets/icons/icons_bitmap.h
+snapshots/

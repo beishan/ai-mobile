@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stddef.h>
+#include <string.h>
 
 #define STATUS_BAR_HEIGHT 24
 
@@ -40,8 +41,6 @@ static void draw_battery_icon(gfx_framebuffer_t *fb, int x, int y, int percent, 
     gfx_fill_rect(fb, x + 2, y + 5, fill, 8, color);
 }
 
-static void draw_rounded_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_t color);
-
 static void home_status_bar(gfx_framebuffer_t *fb, const font_t *font) {
     const font_face_t *small = font_get_face(FONT_SIZE_12);
     int text_y = (STATUS_BAR_HEIGHT - small->size) / 2;
@@ -65,79 +64,88 @@ static void home_info_card(gfx_framebuffer_t *fb, const app_state_t *app, int x,
     const font_face_t *clock_font = font_get_face(FONT_SIZE_24);
 
     const char *cities[] = {"北京", "上海", "广州"};
-    const char *conditions[] = {"晴", "雨", "云"};
+    const char *conditions[] = {"晴", "多云", "雨", "雪"};
     const int temps[] = {26, 22, 29};
     int city = app->weather_city_index;
     if (city < 0 || city > 2) {
         city = 0;
     }
 
-    /* Outer border */
-    gfx_draw_rect(fb, x, y, w, h, GFX_BLACK);
+    /* Outer border - rounded rectangle with thicker border and larger radius */
+    gfx_draw_rounded_rect_thick(fb, x, y, w, h, 12, 3, GFX_BLACK);
 
     /* Vertical divider — left ~60%, right ~40% */
     int divider_x = x + w * 3 / 5;
     gfx_fill_rect(fb, divider_x, y + 8, 1, h - 16, GFX_BLACK);
 
-    /* --- Left: weather --- */
-    /* Sun icon: hollow disc outline drawn pixel-by-pixel (Bresenham circle, r=8) + rays. */
-    int icon_cx = x + 30;
-    int icon_cy = y + h / 2;
-    {
-        int r = 8;
-        int cx = 0, cy = r;
-        int d = 3 - 2 * r;
-        while (cx <= cy) {
-            int pts[][2] = {
-                {icon_cx + cx, icon_cy + cy}, {icon_cx - cx, icon_cy + cy},
-                {icon_cx + cx, icon_cy - cy}, {icon_cx - cx, icon_cy - cy},
-                {icon_cx + cy, icon_cy + cx}, {icon_cx - cy, icon_cy + cx},
-                {icon_cx + cy, icon_cy - cx}, {icon_cx - cy, icon_cy - cx},
-            };
-            for (size_t k = 0; k < sizeof(pts) / sizeof(pts[0]); k++) {
-                gfx_set_pixel(fb, pts[k][0], pts[k][1], GFX_BLACK);
-            }
-            if (d < 0) {
-                d += 4 * cx + 6;
-            } else {
-                d += 4 * (cx - cy) + 10;
-                cy--;
-            }
-            cx++;
-        }
-        /* Rays (4 cardinal + 4 diagonal) */
-        gfx_fill_rect(fb, icon_cx - 1, icon_cy - 12, 2, 2, GFX_BLACK);
-        gfx_fill_rect(fb, icon_cx - 1, icon_cy + 10, 2, 2, GFX_BLACK);
-        gfx_fill_rect(fb, icon_cx - 12, icon_cy - 1, 2, 2, GFX_BLACK);
-        gfx_fill_rect(fb, icon_cx + 10, icon_cy - 1, 2, 2, GFX_BLACK);
+    /* --- Left: weather with icon based on weather type --- */
+    /* Select weather icon based on weather_type: 0=sunny, 1=cloudy, 2=rainy, 3=snowy */
+    ui_icon_kind_t weather_icon;
+    switch (app->weather_type) {
+        case 0:
+            weather_icon = UI_ICON_SUNNY;
+            break;
+        case 1:
+            weather_icon = UI_ICON_CLOUDY;
+            break;
+        case 2:
+            weather_icon = UI_ICON_RAINY;
+            break;
+        case 3:
+            weather_icon = UI_ICON_SNOWY;
+            break;
+        default:
+            weather_icon = UI_ICON_SUNNY;
+            break;
     }
+    
+    /* Draw weather icon at left side */
+    int icon_size = 64;
+    int icon_x = x + 16;
+    int icon_y = y + (h - icon_size) / 2;
+    ui_draw_icon(fb, weather_icon, icon_x, icon_y, 0);
 
     /* Weather text to the right of the icon */
-    int text_x = icon_cx + 16;
+    int text_x = icon_x + icon_size + 8;
     char temp_str[16];
-    snprintf(temp_str, sizeof(temp_str), "%dC %s", temps[city], conditions[city]);
-    font_draw_text(temp_font, fb, text_x, icon_cy - temp_font->size + 2, temp_str, GFX_BLACK);
-    font_draw_text(city_font, fb, text_x, icon_cy + 6, cities[city], GFX_BLACK);
+    snprintf(temp_str, sizeof(temp_str), "%d C %s", temps[city], conditions[app->weather_type]);  // Use " C" instead of "°C" for font compatibility
+    font_draw_text(temp_font, fb, text_x, y + h / 2 - temp_font->size / 2 - 6, temp_str, GFX_BLACK);  // Centered vertically
+    font_draw_text(city_font, fb, text_x, y + h / 2 + 6, cities[city], GFX_BLACK);  // Below temperature
 
-    /* --- Right: large clock --- */
-    const char *clock_text = "14:35";
-    font_draw_text_aligned(clock_font, fb, divider_x, y + (h - clock_font->size) / 2 - 4,
+    /* --- Right: large clock with lunar date --- */
+    const char *clock_text = "09:41";
+    font_draw_text_aligned(clock_font, fb, divider_x, y + h / 2 - clock_font->size / 2 - 8,
                             w - (divider_x - x), clock_text, FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_aligned(small, fb, divider_x, y + (h - clock_font->size) / 2 + clock_font->size,
-                            w - (divider_x - x), "星期三", FONT_ALIGN_CENTER, GFX_BLACK);
+    
+    /* Lunar calendar date below clock */
+    const char *lunar_date = "农历 五月初十";
+    font_draw_text_aligned(small, fb, divider_x, y + h / 2 + small->size / 2 + 2,
+                            w - (divider_x - x), lunar_date, FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 static void app_tile(gfx_framebuffer_t *fb, const font_t *font, ui_icon_kind_t icon, int x, int y, int w, int h, const char *label, int selected) {
     const font_face_t *label_font = font_get_face(FONT_SIZE_18);
-    int icon_size = 48;
-    int icon_x = x + (w - icon_size) / 2;
-    int icon_y = y + (h - icon_size - 28) / 2;
+    /* Use 52 as the uniform icon bounding box size (largest icon is reader/weather at ~52px) */
+    int icon_bbox_size = 52;
+    int label_height = label_font->size;
+    int total_content_height = icon_bbox_size + 8 + label_height;  // icon bbox + spacing + text
+    
+    /* Center the entire content vertically */
+    int content_start_y = y + (h - total_content_height) / 2;
+    
+    /* Center the icon bounding box horizontally */
+    int icon_x = x + (w - icon_bbox_size) / 2;
+    int icon_y = content_start_y;
+    
     (void)font;
     if (selected) {
-        draw_rounded_rect(fb, x, y, w, h, GFX_BLACK);
+        gfx_draw_rounded_rect_thick(fb, x, y, w, h, 12, 3, GFX_BLACK);
     }
     ui_draw_icon(fb, icon, icon_x, icon_y, 0);
-    font_draw_text_aligned(label_font, fb, x, icon_y + icon_size + 8, w, label, FONT_ALIGN_CENTER, GFX_BLACK);
+    
+    /* Center text below icon */
+    int text_y = icon_y + icon_bbox_size + 8;
+    font_draw_text_aligned(label_font, fb, x, text_y, w, label, FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
@@ -156,7 +164,7 @@ static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const fon
     /* Info card above the grid: weather + clock */
     const int card_margin = PAGE_MARGIN_X;
     const int card_w = GFX_WIDTH - 2 * card_margin;
-    const int card_h = 96;
+    const int card_h = 120;  // Increased from 96 to 120 for better spacing
     const int card_x = card_margin;
     const int card_y = BODY_TOP + 8;
     home_info_card(fb, app, card_x, card_y, card_w, card_h);
@@ -184,21 +192,6 @@ static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const fon
     }
 }
 
-static void draw_rounded_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_t color) {
-    gfx_fill_rect(fb, x + 6, y, w - 12, 1, color);
-    gfx_fill_rect(fb, x + 6, y + h - 1, w - 12, 1, color);
-    gfx_fill_rect(fb, x, y + 6, 1, h - 12, color);
-    gfx_fill_rect(fb, x + w - 1, y + 6, 1, h - 12, color);
-    gfx_set_pixel(fb, x + 3, y + 2, color);
-    gfx_set_pixel(fb, x + 2, y + 3, color);
-    gfx_set_pixel(fb, x + w - 4, y + 2, color);
-    gfx_set_pixel(fb, x + w - 3, y + 3, color);
-    gfx_set_pixel(fb, x + 3, y + h - 3, color);
-    gfx_set_pixel(fb, x + 2, y + h - 4, color);
-    gfx_set_pixel(fb, x + w - 4, y + h - 3, color);
-    gfx_set_pixel(fb, x + w - 3, y + h - 4, color);
-}
-
 static void draw_file_type_icon(gfx_framebuffer_t *fb, const font_face_t *font, int x, int y, const char *type) {
     char mark[2] = {'?', '\0'};
     if (type != NULL && type[0] != '\0') {
@@ -214,32 +207,113 @@ static void draw_file_type_icon(gfx_framebuffer_t *fb, const font_face_t *font, 
 }
 
 static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    const font_face_t *normal = font_get_face(FONT_SIZE_16);
     const font_face_t *small = font_get_face(FONT_SIZE_14);
+    /* Check if external font is available for cover decoration */
+    const external_font_t *cover_ext = font_manager_get(24);
+    int cover_font_size = cover_ext != NULL ? cover_ext->height : 24;
+    int cover_font_width = cover_ext != NULL ? cover_ext->width : 24;
+    
+    /* Grid layout: 3 columns x N rows */
+    const int cols = 3;
+    const int card_w = 128;      /* Card width including cover + text */
+    const int card_h = 280;      /* Total card height (cover + title + author + progress) */
+    const int cover_h = 220;     /* Cover area height - larger for decorative pattern */
+    const int gap_x = 24;        /* Horizontal gap between cards */
+    const int gap_y = 20;        /* Vertical gap between cards */
+    
+    /* Calculate grid position to center it in content area */
+    int total_grid_w = cols * card_w + (cols - 1) * gap_x;
+    int start_x = PAGE_MARGIN_X + (CONTENT_WIDTH - total_grid_w) / 2;
+    int start_y = BODY_TOP + 10;
+    
+    int book_count = reader_library_book_count();
+    int books_per_page = 9;  /* 3x3 grid per page */
+    int max_books_to_show = book_count < books_per_page ? book_count : books_per_page;
 
-    title_bar(fb, font, "书架", "3本");
-    for (int i = 0; i < reader_library_book_count(); i++) {
-        const int row_height = 34;
-        const int icon_height = 22;
-        int row_top = 38 + i * 40;
-        int icon_y = row_top + (row_height - icon_height) / 2;
-        int title_y = row_top + (row_height - normal->size) / 2;
-        int small_y = row_top + (row_height - small->size) / 2;
+    title_bar(fb, font, "书架", NULL);
+    
+    for (int i = 0; i < max_books_to_show; i++) {
+        int col = i % cols;
+        int row = i / cols;
+        int card_x = start_x + col * (card_w + gap_x);
+        int card_y = start_y + row * (card_h + gap_y);
+        
         int percent = (app->book_current_pages[i] + 1) * 100 / app->book_pages[i];
-        char progress[12];
         const reader_book_t *book = reader_library_book(i);
 
-        snprintf(progress, sizeof(progress), "%d%%", percent);
+        /* Draw cover frame with rounded corners */
+        int cover_x = card_x;
+        int cover_y = card_y;
+        int cover_w = card_w;
+        int cover_r = 8;
+        
         if (app->bookshelf_selection == i) {
-            draw_rounded_rect(fb, 12, row_top, GFX_WIDTH - 24, row_height, GFX_BLACK);
+            /* Selected book gets thick rounded border */
+            gfx_draw_rounded_rect_thick(fb, cover_x - 2, cover_y - 2, cover_w + 4, cover_h + 4, 12, 3, GFX_BLACK);
+        } else {
+            /* Regular cover border */
+            gfx_draw_rounded_rect(fb, cover_x, cover_y, cover_w, cover_h, cover_r, GFX_BLACK);
         }
-        draw_file_type_icon(fb, small, 24, icon_y, book->file_type);
-        font_draw_text(normal, fb, 54, title_y, book->title, GFX_BLACK);
+
+        /* Decorative cover pattern - large first character of title */
+        /* Center the large character in the cover area */
+        const char *first_char = book->title;
+        if (first_char != NULL && first_char[0] != '\0') {
+            char single_char[5] = {0};
+            /* Handle UTF-8 multi-byte characters */
+            int byte_len = 1;
+            if ((unsigned char)first_char[0] >= 0xE0) {
+                byte_len = 3;  /* Chinese character */
+            } else if ((unsigned char)first_char[0] >= 0xC0) {
+                byte_len = 2;
+            }
+            strncpy(single_char, first_char, byte_len);
+            single_char[byte_len] = '\0';
+            
+            /* Draw large centered character as decorative element using external font */
+            int char_x = cover_x + (cover_w - cover_font_width) / 2;
+            int char_y = cover_y + (cover_h - cover_font_size) / 2 - 20;  /* Slightly above center */
+            font_draw_text_auto(24, fb, char_x, char_y, single_char, GFX_BLACK);
+        }
+        
+        /* File type icon in top-left corner (smaller and less prominent) */
+        draw_file_type_icon(fb, small, cover_x + 6, cover_y + 6, book->file_type);
+        
+        /* "Recent" badge in top-right if this is the recently read book */
         if (app->recent_book == i) {
-            font_draw_text(small, fb, 170, small_y, "最近", GFX_BLACK);
+            font_draw_text(small, fb, cover_x + cover_w - 50, cover_y + 10, "最近", GFX_BLACK);
         }
-        font_draw_text_aligned(normal, fb, GFX_WIDTH - 112, title_y, 88, progress, FONT_ALIGN_RIGHT, GFX_BLACK);
+
+        /* Title centered below cover (uses external font if available) */
+        int title_y = cover_y + cover_h + 10;
+        font_draw_text_aligned_auto(22, fb, card_x, title_y, card_w, book->title, FONT_ALIGN_CENTER, GFX_BLACK);
+        
+        /* Author centered below title */
+        int author_y = title_y + 18 + 4;  /* Match original spacing: normal font size + gap */
+        font_draw_text_aligned_auto(18, fb, card_x, author_y, card_w, book->author, FONT_ALIGN_CENTER, GFX_BLACK);
+        
+        /* Progress percentage at bottom of card */
+        char progress[12];
+        snprintf(progress, sizeof(progress), "%d%%", percent);
+        int progress_y = author_y + 18 + 6;  /* Use size 18 for author height */
+        font_draw_text_aligned_auto(14, fb, card_x, progress_y, card_w, progress, FONT_ALIGN_CENTER, GFX_BLACK);
     }
+    
+    /* Bottom status bar showing total books and pagination */
+    int footer_y = BODY_BOTTOM - 40;
+    char footer_text[64];
+    snprintf(footer_text, sizeof(footer_text), "共 %d 本书", book_count);
+    font_draw_text_auto(14, fb, PAGE_MARGIN_X, footer_y, footer_text, GFX_BLACK);
+    
+    /* Page indicator in center */
+    int page_indicator_y = footer_y;
+    int page_indicator_x = (GFX_WIDTH - 60) / 2;
+    char page_text[16];
+    snprintf(page_text, sizeof(page_text), "< 1/1 >");
+    font_draw_text_aligned_auto(14, fb, page_indicator_x, page_indicator_y, 60, page_text, FONT_ALIGN_CENTER, GFX_BLACK);
+    
+    /* Sort option on right */
+    font_draw_text_auto(14, fb, GFX_WIDTH - PAGE_MARGIN_X - 100, footer_y, "按最近阅读", GFX_BLACK);
 }
 
 static const font_face_t *reader_body_font(const app_state_t *app) {
@@ -269,13 +343,30 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
     snprintf(title, sizeof(title), "%s | %s", book->title, book->chapter_title);
     title_bar(fb, font, title, page);
 
-    font_draw_text_box_spaced(body_font, fb, 24, 46, 352, 154,
+    /* Reader body text fills the content area below the title bar */
+    int reader_y = BODY_TOP + 8;
+    int reader_h = BODY_HEIGHT - 24;  /* leave room for bottom progress bar */
+    font_draw_text_box_spaced(body_font, fb, PAGE_MARGIN_X, reader_y, CONTENT_WIDTH, reader_h,
                               reader_library_page_text(app->current_book, app->reader_page),
                               reader_line_height(app, body_font),
                               GFX_BLACK);
 
+    /* Bottom reading progress strip */
+    {
+        int bar_y = BODY_BOTTOM - 8;
+        int bar_h = 6;
+        int total_pages = app->book_pages[app->current_book];
+        int fill_w = CONTENT_WIDTH;
+        if (total_pages > 1) {
+            fill_w = CONTENT_WIDTH * (app->reader_page + 1) / total_pages;
+        }
+        gfx_fill_rect(fb, PAGE_MARGIN_X, bar_y, CONTENT_WIDTH, bar_h, GFX_WHITE);
+        gfx_draw_rect(fb, PAGE_MARGIN_X, bar_y, CONTENT_WIDTH, bar_h, GFX_BLACK);
+        gfx_fill_rect(fb, PAGE_MARGIN_X + 1, bar_y + 1, fill_w > 2 ? fill_w - 2 : 0, bar_h - 2, GFX_BLACK);
+    }
+
     if (app->reader_menu_open) {
-        const font_face_t *menu = font_get_face(FONT_SIZE_16);
+        const font_face_t *menu = font_get_face(FONT_SIZE_18);
         int has_bookmark = app->book_bookmark_pages[app->current_book] == app->reader_page;
         const char *items[] = {
             "继续阅读",
@@ -283,32 +374,39 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
             has_bookmark ? "已加书签" : "添加书签",
             "退出到书架"
         };
-        gfx_fill_rect(fb, 88, 64, 224, 138, GFX_WHITE);
-        gfx_draw_rect(fb, 88, 64, 224, 138, GFX_BLACK);
-        gfx_fill_rect(fb, 88, 64, 224, 4, GFX_BLACK);
+        /* Centered menu overlay */
+        int menu_w = 320;
+        int menu_h = 4 * 40 + 24;
+        int menu_x = (GFX_WIDTH - menu_w) / 2;
+        int menu_y = (GFX_HEIGHT - menu_h) / 2;
+        gfx_fill_rect(fb, menu_x, menu_y, menu_w, menu_h, GFX_WHITE);
+        gfx_draw_rounded_rect_thick(fb, menu_x, menu_y, menu_w, menu_h, 10, 2, GFX_BLACK);
         for (int i = 0; i < 4; i++) {
-            int y = 82 + i * 28;
+            int y = menu_y + 20 + i * 40;
             gfx_color_t color = GFX_BLACK;
             if (app->reader_menu_selection == i) {
-                gfx_fill_rect(fb, 104, y - 5, 192, 24, GFX_BLACK);
+                gfx_fill_rect(fb, menu_x + 12, y - 4, menu_w - 24, 32, GFX_BLACK);
                 color = GFX_WHITE;
             }
-            font_draw_text(menu, fb, 124, y, items[i], color);
+            font_draw_text_aligned(menu, fb, menu_x + 12, y, menu_w - 24, items[i], FONT_ALIGN_CENTER, color);
         }
         if (app->reader_catalog_open) {
             int chapter_count = reader_library_chapter_count(app->current_book);
-            gfx_fill_rect(fb, 66, 52, 268, 164, GFX_WHITE);
-            gfx_draw_rect(fb, 66, 52, 268, 164, GFX_BLACK);
-            gfx_fill_rect(fb, 66, 52, 268, 4, GFX_BLACK);
-            font_draw_text(font_get_face(FONT_SIZE_14), fb, 86, 68, "目录", GFX_BLACK);
+            int cat_w = 360;
+            int cat_h = chapter_count * 40 + 60;
+            int cat_x = (GFX_WIDTH - cat_w) / 2;
+            int cat_y = (GFX_HEIGHT - cat_h) / 2;
+            gfx_fill_rect(fb, cat_x, cat_y, cat_w, cat_h, GFX_WHITE);
+            gfx_draw_rounded_rect_thick(fb, cat_x, cat_y, cat_w, cat_h, 10, 2, GFX_BLACK);
+            font_draw_text_aligned(font_get_face(FONT_SIZE_18), fb, cat_x + 16, cat_y + 16, cat_w - 32, "目录", FONT_ALIGN_CENTER, GFX_BLACK);
             for (int i = 0; i < chapter_count; i++) {
-                int y = 98 + i * 32;
+                int y = cat_y + 52 + i * 40;
                 gfx_color_t color = GFX_BLACK;
                 if (app->reader_catalog_selection == i) {
-                    gfx_fill_rect(fb, 82, y - 5, 236, 24, GFX_BLACK);
+                    gfx_fill_rect(fb, cat_x + 12, y - 4, cat_w - 24, 32, GFX_BLACK);
                     color = GFX_WHITE;
                 }
-                font_draw_text(menu, fb, 98, y, reader_library_chapter_title(app->current_book, i), color);
+                font_draw_text_aligned(menu, fb, cat_x + 16, y, cat_w - 32, reader_library_chapter_title(app->current_book, i), FONT_ALIGN_CENTER, color);
             }
         }
     }
@@ -353,7 +451,7 @@ static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const 
         int card_temps[] = {temps[city], temps[city] - 2, lows[city]};
         for (int i = 0; i < 3; i++) {
             int cx = PAGE_MARGIN_X + i * (card_w + gap);
-            gfx_draw_rect(fb, cx, card_y, card_w, card_h, GFX_BLACK);
+            gfx_draw_rounded_rect_thick(fb, cx, card_y, card_w, card_h, 8, 2, GFX_BLACK);
             font_draw_text_aligned(small, fb, cx, card_y + 18, card_w, labels[i], FONT_ALIGN_CENTER, GFX_BLACK);
             char t[12];
             snprintf(t, sizeof(t), "%dC", card_temps[i]);
@@ -365,7 +463,7 @@ static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const 
     {
         int aq_y = BODY_TOP + 480;
         font_draw_text_aligned(small, fb, PAGE_MARGIN_X, aq_y, CONTENT_WIDTH, "空气质量 良", FONT_ALIGN_CENTER, GFX_BLACK);
-        gfx_draw_rect(fb, PAGE_MARGIN_X, aq_y + 40, CONTENT_WIDTH, 16, GFX_BLACK);
+        gfx_draw_rounded_rect_thick(fb, PAGE_MARGIN_X, aq_y + 40, CONTENT_WIDTH, 16, 4, 1, GFX_BLACK);
         gfx_fill_rect(fb, PAGE_MARGIN_X, aq_y + 40, app->weather_stale ? CONTENT_WIDTH / 3 : CONTENT_WIDTH * 2 / 3, 16, GFX_BLACK);
     }
 }
@@ -407,8 +505,8 @@ static void render_calendar(gfx_framebuffer_t *fb, const app_state_t *app, const
             char label[4];
             snprintf(label, sizeof(label), "%d", day);
             if (day == app->calendar_selected_day) {
-                gfx_draw_rect(fb, cx + 8, cy + 8, col_w - 16, cell_h - 16, GFX_BLACK);
-                gfx_draw_rect(fb, cx + 10, cy + 10, col_w - 20, cell_h - 20, GFX_BLACK);
+                gfx_draw_rounded_rect_thick(fb, cx + 8, cy + 8, col_w - 16, cell_h - 16, 6, 2, GFX_BLACK);
+                gfx_draw_rounded_rect_thick(fb, cx + 10, cy + 10, col_w - 20, cell_h - 20, 4, 1, GFX_BLACK);
             }
             if (day == 15 && app->calendar_month_offset == 0) {
                 gfx_fill_rect(fb, cx + 10, cy + 10, col_w - 20, cell_h - 20, GFX_BLACK);
@@ -423,7 +521,7 @@ static void render_calendar(gfx_framebuffer_t *fb, const app_state_t *app, const
         char selected[32];
         snprintf(selected, sizeof(selected), "%d月%d日", month, app->calendar_selected_day);
         gfx_fill_rect(fb, PAGE_MARGIN_X, box_y, CONTENT_WIDTH, box_h, GFX_WHITE);
-        gfx_draw_rect(fb, PAGE_MARGIN_X, box_y, CONTENT_WIDTH, box_h, GFX_BLACK);
+        gfx_draw_rounded_rect_thick(fb, PAGE_MARGIN_X, box_y, CONTENT_WIDTH, box_h, 10, 2, GFX_BLACK);
         gfx_fill_rect(fb, PAGE_MARGIN_X, box_y, CONTENT_WIDTH, 5, GFX_BLACK);
         font_draw_text_aligned(normal, fb, PAGE_MARGIN_X, box_y + 18, CONTENT_WIDTH / 2, selected, FONT_ALIGN_CENTER, GFX_BLACK);
         font_draw_text_aligned(small, fb, PAGE_MARGIN_X, box_y + 60, CONTENT_WIDTH, "农历五月十九 宜阅读", FONT_ALIGN_CENTER, GFX_BLACK);
@@ -450,7 +548,7 @@ static void render_english(gfx_framebuffer_t *fb, const app_state_t *app, const 
     {
         int card_y = BODY_TOP + 20;
         int card_h = 240;
-        gfx_draw_rect(fb, PAGE_MARGIN_X, card_y, CONTENT_WIDTH, card_h, GFX_BLACK);
+        gfx_draw_rounded_rect_thick(fb, PAGE_MARGIN_X, card_y, CONTENT_WIDTH, card_h, 10, 2, GFX_BLACK);
         font_draw_text_aligned(big, fb, PAGE_MARGIN_X, card_y + 60, CONTENT_WIDTH, words[app->english_word], FONT_ALIGN_CENTER, GFX_BLACK);
         font_draw_text_aligned(small, fb, PAGE_MARGIN_X, card_y + 150, CONTENT_WIDTH, sounds[app->english_word], FONT_ALIGN_CENTER, GFX_BLACK);
     }
@@ -481,41 +579,222 @@ static void render_english(gfx_framebuffer_t *fb, const app_state_t *app, const 
     }
 }
 
-static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    const font_face_t *normal = font_get_face(FONT_SIZE_22);
-    const font_face_t *small = font_get_face(FONT_SIZE_18);
-    const int font_sizes[] = {16, 18, 20, 22, 24};
-    const char *line_spacing[] = {"紧凑", "标准", "舒适", "宽松"};
-    const char *cities[] = {"北京", "上海", "广州"};
-    const int row_count = 6;
-    const int gap = 12;
-    const int row_h = (BODY_HEIGHT - gap * (row_count - 1)) / row_count;
-    char rows[6][32];
+/* ====== Settings Page Helper Functions ====== */
 
-    snprintf(rows[0], sizeof(rows[0]), "字体大小 %d", font_sizes[app->font_size_index]);
-    snprintf(rows[1], sizeof(rows[1]), "字体 宋体");
-    snprintf(rows[2], sizeof(rows[2]), "行间距 %s", line_spacing[app->line_spacing_index]);
-    snprintf(rows[3], sizeof(rows[3]), "WiFi %s", app->wifi_connected ? "已连接" : "未连接");
-    snprintf(rows[4], sizeof(rows[4]), "城市 %s", cities[app->weather_city_index]);
-    snprintf(rows[5], sizeof(rows[5]), "省电模式 %s", app->power_saving_enabled ? "开" : "关");
-    title_bar(fb, font, "设置", "");
-    for (int i = 0; i < row_count; i++) {
-        int y = BODY_TOP + i * (row_h + gap);
-        int text_y = y + (row_h - normal->size) / 2;
-        if (app->settings_selection == i) {
-            gfx_fill_rect(fb, PAGE_MARGIN_X, y, CONTENT_WIDTH, row_h, GFX_BLACK);
-            font_draw_text(normal, fb, PAGE_MARGIN_X + 20, text_y, rows[i], GFX_WHITE);
-            if (i == 5 && app->power_saving_enabled) {
-                gfx_fill_rect(fb, GFX_WIDTH - PAGE_MARGIN_X - 60, y + (row_h - 24) / 2, 40, 24, GFX_WHITE);
-            }
+/* Draw a section group box with rounded corners */
+static void draw_settings_group_box(gfx_framebuffer_t *fb, int x, int y, int w, int h, int radius) {
+    gfx_draw_rounded_rect_thick(fb, x, y, w, h, radius, 1, GFX_BLACK);
+}
+
+/* Draw a settings list item with icon, label, value, and arrow */
+static void draw_settings_list_item(gfx_framebuffer_t *fb, int x, int y, int w, int h,
+                                     const char *icon_char, const char *label,
+                                     const char *value, int selected) {
+    /* Background highlight for selected item */
+    if (selected) {
+        gfx_fill_rect(fb, x + 2, y + 2, w - 4, h - 4, GFX_BLACK);
+    }
+    
+    /* Icon on the left (optional) */
+    int label_x = x + 20;
+    if (icon_char != NULL && icon_char[0] != '\0') {
+        int icon_y = y + (h - 24) / 2;
+        font_draw_text_auto(24, fb, label_x, icon_y, icon_char, selected ? GFX_WHITE : GFX_BLACK);
+        label_x += 32;  /* Space for icon */
+    }
+    
+    /* Label */
+    int label_y = y + (h - 20) / 2;
+    font_draw_text_auto(20, fb, label_x, label_y, label, selected ? GFX_WHITE : GFX_BLACK);
+    
+    /* Arrow '>' on far right */
+    int arrow_x = x + w - 24;
+    int arrow_y = y + (h - 18) / 2;
+    font_draw_text_auto(18, fb, arrow_x, arrow_y, ">", selected ? GFX_WHITE : GFX_BLACK);
+    
+    /* Value before arrow (right-aligned) */
+    if (value != NULL && value[0] != '\0') {
+        int value_width = font_measure_text_auto(18, value);
+        int value_x = arrow_x - value_width - 8;  /* Position before arrow with small spacing */
+        int value_y = y + (h - 18) / 2;
+        
+        /* Always keep value right-aligned before arrow, even if it overlaps with label */
+        /* This is common UI pattern for settings pages */
+        font_draw_text_auto(18, fb, value_x, value_y, value, selected ? GFX_WHITE : GFX_BLACK);
+    }
+}
+
+/* Draw section header */
+static void draw_section_header(gfx_framebuffer_t *fb, int x, int y, const char *text) {
+    font_draw_text_auto(20, fb, x, y, text, GFX_BLACK);
+}
+
+/* Main settings page rendering */
+static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
+    (void)font;  /* Suppress unused parameter warning */
+    
+    const char *cities[] = {"北京", "上海", "杭州"};
+    
+    int current_y = BODY_TOP + 10;
+    int item_height = 46;
+    int group_gap = 12;
+    int header_gap = 26;
+    
+    /* Title: 系统设置 */
+    font_draw_text_auto(24, fb, PAGE_MARGIN_X, current_y, "系统设置", GFX_BLACK);
+    current_y += 34;
+    
+    /* === Group 1: 网络与连接 === */
+    draw_section_header(fb, PAGE_MARGIN_X, current_y, "网络与连接");
+    current_y += header_gap;
+    
+    int group1_items = 2;
+    int group1_h = group1_items * item_height + (group1_items - 1) * 0;
+    int group1_y = current_y;
+    draw_settings_group_box(fb, PAGE_MARGIN_X, group1_y, CONTENT_WIDTH, group1_h, 8);
+    
+    /* WiFi item */
+    char wifi_value[32];
+    snprintf(wifi_value, sizeof(wifi_value), "%s", app->wifi_connected ? "已连接 Reader5G" : "未连接");
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, group1_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "WiFi", app->wifi_connected ? wifi_value : "", 0);
+    
+    /* Divider line (between items) */
+    int divider_y = group1_y + item_height;
+    gfx_fill_rect(fb, PAGE_MARGIN_X + 70, divider_y, CONTENT_WIDTH - 140, 1, GFX_BLACK);
+    
+    /* Bluetooth item */
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, divider_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "蓝牙", "关闭", 0);
+    
+    current_y += group1_h + group_gap;
+    
+    /* === Group 2: 系统与时间 === */
+    draw_section_header(fb, PAGE_MARGIN_X, current_y, "系统与时间");
+    current_y += header_gap;
+    
+    int group2_items = 2;
+    int group2_h = group2_items * item_height + (group2_items - 1) * 0;
+    int group2_y = current_y;
+    draw_settings_group_box(fb, PAGE_MARGIN_X, group2_y, CONTENT_WIDTH, group2_h, 8);
+    
+    /* Weather city */
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, group2_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "天气城市", cities[app->weather_city_index], 0);
+    
+    /* Divider */
+    divider_y = group2_y + item_height;
+    gfx_fill_rect(fb, PAGE_MARGIN_X + 70, divider_y, CONTENT_WIDTH - 140, 1, GFX_BLACK);
+    
+    /* Time sync */
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, divider_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "时间同步", "已同步 09:41", 0);
+    
+    current_y += group2_h + group_gap;
+    
+    /* === Group 3: 电源与性能 === */
+    draw_section_header(fb, PAGE_MARGIN_X, current_y, "电源与性能");
+    current_y += header_gap;
+    
+    int group3_items = 2;
+    int group3_h = group3_items * item_height + (group3_items - 1) * 0;
+    int group3_y = current_y;
+    draw_settings_group_box(fb, PAGE_MARGIN_X, group3_y, CONTENT_WIDTH, group3_h, 8);
+    
+    /* Battery saving mode with toggle */
+    {
+        int item_y = group3_y;
+        const font_face_t *toggle_font = font_get_face(FONT_SIZE_20);
+        int label_y = item_y + (item_height - toggle_font->size) / 2;
+        
+        /* No icon for battery saving mode, just label and toggle */
+        int label_x = PAGE_MARGIN_X + 30;
+        font_draw_text_auto(20, fb, label_x, label_y, "电池节能模式", GFX_BLACK);
+        
+        /* Toggle switch (positioned before arrow) */
+        int toggle_w = 48;
+        int toggle_h = 24;
+        int toggle_y = item_y + (item_height - toggle_h) / 2;
+        int arrow_x = PAGE_MARGIN_X + CONTENT_WIDTH - 20 - 24;  /* Arrow position */
+        int toggle_x = arrow_x - toggle_w - 10;  /* Toggle before arrow with spacing */
+        
+        /* Toggle background */
+        if (app->power_saving_enabled) {
+            gfx_fill_rect(fb, toggle_x, toggle_y, toggle_w, toggle_h, GFX_BLACK);
         } else {
-            font_draw_text(normal, fb, PAGE_MARGIN_X + 20, text_y, rows[i], GFX_BLACK);
-            if (i == 5 && app->power_saving_enabled) {
-                gfx_fill_rect(fb, GFX_WIDTH - PAGE_MARGIN_X - 60, y + (row_h - 24) / 2, 40, 24, GFX_BLACK);
+            gfx_draw_rect(fb, toggle_x, toggle_y, toggle_w, toggle_h, GFX_BLACK);
+        }
+        
+        /* Toggle knob */
+        int knob_r = 10;
+        int knob_x = app->power_saving_enabled ? (toggle_x + toggle_w - knob_r - 2) : (toggle_x + knob_r + 2);
+        int knob_y = toggle_y + toggle_h / 2;
+        
+        /* Draw filled circle as knob */
+        gfx_color_t knob_color = app->power_saving_enabled ? GFX_WHITE : GFX_BLACK;
+        for (int dy = -knob_r; dy <= knob_r; dy++) {
+            for (int dx = -knob_r; dx <= knob_r; dx++) {
+                if (dx*dx + dy*dy <= knob_r*knob_r) {
+                    gfx_set_pixel(fb, knob_x + dx, knob_y + dy, knob_color);
+                }
             }
         }
-        (void)small;
+        
+        /* Arrow after toggle */
+        int arrow_y = item_y + (item_height - 18) / 2;
+        font_draw_text_auto(18, fb, arrow_x, arrow_y, ">", GFX_BLACK);
     }
+    
+    /* Divider */
+    divider_y = group3_y + item_height;
+    gfx_fill_rect(fb, PAGE_MARGIN_X + 70, divider_y, CONTENT_WIDTH - 140, 1, GFX_BLACK);
+    
+    /* Storage space */
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, divider_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "存储空间", "12.6GB/32GB", 0);
+    
+    current_y += group3_h + group_gap;
+    
+    /* === Group 4: 内容与服务 === */
+    draw_section_header(fb, PAGE_MARGIN_X, current_y, "内容与服务");
+    current_y += header_gap;
+    
+    int group4_items = 1;
+    int group4_h = group4_items * item_height;
+    int group4_y = current_y;
+    draw_settings_group_box(fb, PAGE_MARGIN_X, group4_y, CONTENT_WIDTH, group4_h, 8);
+    
+    /* Dictionary management */
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, group4_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "字典管理", "3个字典", 0);
+    
+    current_y += group4_h + group_gap;
+    
+    /* === Group 5: 关于与更新 === */
+    draw_section_header(fb, PAGE_MARGIN_X, current_y, "关于与更新");
+    current_y += header_gap;
+    
+    int group5_items = 2;
+    int group5_h = group5_items * item_height + (group5_items - 1) * 0;
+    int group5_y = current_y;
+    draw_settings_group_box(fb, PAGE_MARGIN_X, group5_y, CONTENT_WIDTH, group5_h, 8);
+    
+    /* About device */
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, group5_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "关于设备", "Reader X", 0);
+    
+    /* Divider */
+    divider_y = group5_y + item_height;
+    gfx_fill_rect(fb, PAGE_MARGIN_X + 70, divider_y, CONTENT_WIDTH - 140, 1, GFX_BLACK);
+    
+    /* Software update */
+    draw_settings_list_item(fb, PAGE_MARGIN_X + 10, divider_y, CONTENT_WIDTH - 20, item_height,
+                            NULL, "软件更新", "V1.2.0", 0);
+    
+    current_y += group5_h;
+    
+    /* Bottom progress indicator */
+    font_draw_text_auto(24, fb, PAGE_MARGIN_X, GFX_HEIGHT - 30, "20%", GFX_BLACK);
 }
 
 static void render_about(gfx_framebuffer_t *fb, const font_t *font) {

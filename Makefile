@@ -8,10 +8,17 @@ TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/epd_frame.c src/plat
 SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/sim_display.c src/app/app_state.c src/app/app_persistence.c src/app/reader_library.c src/ui/pages.c src/ui/icons.c src/font/font.c
 SDL_SIM_SRCS := src/main_sdl.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/sdl_display.c src/app/app_state.c src/app/app_persistence.c src/app/reader_library.c src/ui/pages.c src/ui/icons.c src/font/font.c
 
-.PHONY: test clean
+# External font test
+EXT_FONT_TEST_BIN := tests/test_external_font
+EXT_FONT_TEST_SRCS := tests/test_external_font.c src/gfx/gfx.c src/platform/sim_display.c src/font/font.c
+
+.PHONY: test clean test-external-font
 
 test: $(TEST_BIN)
 	./$(TEST_BIN)
+
+test-external-font: $(EXT_FONT_TEST_BIN)
+	./$(EXT_FONT_TEST_BIN)
 
 reader_sim: $(SIM_SRCS)
 	$(CC) $(CFLAGS) $(SIM_SRCS) -o reader_sim
@@ -22,6 +29,9 @@ reader_sim_sdl: $(SDL_SIM_SRCS)
 $(TEST_BIN): $(TEST_SRCS)
 	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(TEST_SRCS) $(SDL_LIBS) -o $(TEST_BIN)
 
+$(EXT_FONT_TEST_BIN): $(EXT_FONT_TEST_SRCS)
+	$(CC) $(CFLAGS) $(EXT_FONT_TEST_SRCS) -o $(EXT_FONT_TEST_BIN)
+
 clean:
-	rm -f $(TEST_BIN) reader_sim reader_sim_sdl
+	rm -f $(TEST_BIN) reader_sim reader_sim_sdl $(EXT_FONT_TEST_BIN)
 	rm -rf out

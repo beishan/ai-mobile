@@ -23,6 +23,9 @@ gfx_color_t gfx_get_pixel(const gfx_framebuffer_t *fb, int x, int y);
 void gfx_set_pixel(gfx_framebuffer_t *fb, int x, int y, gfx_color_t color);
 void gfx_fill_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_t color);
 void gfx_draw_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_t color);
+void gfx_fill_rounded_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, int radius, gfx_color_t color);
+void gfx_draw_rounded_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, int radius, gfx_color_t color);
+void gfx_draw_rounded_rect_thick(gfx_framebuffer_t *fb, int x, int y, int w, int h, int radius, int thickness, gfx_color_t color);
 void gfx_draw_text(gfx_framebuffer_t *fb, int x, int y, const char *text, int scale, gfx_color_t color);
 
 /**

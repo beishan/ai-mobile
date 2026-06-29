@@ -1,6 +1,8 @@
 #include "ui/icons.h"
 #include "icons/icons_bitmap.h"
 
+#include <stddef.h>
+
 static void px(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_t color) {
     gfx_fill_rect(fb, x, y, w, h, color);
 }
@@ -75,9 +77,7 @@ static void icon_about(gfx_framebuffer_t *fb, int x, int y) {
 }
 
 void ui_draw_icon(gfx_framebuffer_t *fb, ui_icon_kind_t kind, int x, int y, int selected) {
-    if (selected) {
-        gfx_draw_rect(fb, x - 3, y - 3, 54, 54, GFX_BLACK);
-    }
+    (void)selected; /* Selection border is now drawn by the caller */
 
     /* Prefer bitmap icon if available, fall back to procedural drawing. */
     if (ICON_HAS_BITMAP(kind)) {
@@ -108,6 +108,15 @@ void ui_draw_icon(gfx_framebuffer_t *fb, ui_icon_kind_t kind, int x, int y, int 
             icon_settings(fb, x, y);
             break;
         case UI_ICON_ABOUT:
+            icon_about(fb, x, y);
+            break;
+        /* Weather condition icons use bitmaps from icons_bitmap.h */
+        case UI_ICON_SUNNY:
+        case UI_ICON_CLOUDY:
+        case UI_ICON_RAINY:
+        case UI_ICON_SNOWY:
+            /* These are handled by the bitmap fallback above */
+            return;
         default:
             icon_about(fb, x, y);
             break;
