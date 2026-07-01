@@ -5,6 +5,8 @@ typedef enum {
     APP_PAGE_HOME = 0,
     APP_PAGE_BOOKSHELF,
     APP_PAGE_READER,
+    APP_PAGE_READER_CATALOG,
+    APP_PAGE_READER_SETTINGS,
     APP_PAGE_WEATHER,
     APP_PAGE_CALENDAR,
     APP_PAGE_ENGLISH,
@@ -37,12 +39,19 @@ typedef struct {
     int reader_menu_selection;
     int reader_catalog_open;
     int reader_catalog_selection;
+    int reader_settings_selection;
+    int reader_margin_index;
+    int reader_indent_enabled;
+    int reader_bold_enabled;
+    int reader_page_turn_mode;
+    int reader_refresh_mode;
     int bookmark_added;
     int weather_refreshes;
     int weather_city_index;
     int weather_stale;
     int weather_last_updated_minutes;
     int weather_type; /* 0=sunny, 1=cloudy, 2=rainy, 3=snowy */
+    int weather_scroll;
     int calendar_month_offset;
     int calendar_selected_day;
     int calendar_detail_open;
@@ -52,6 +61,8 @@ typedef struct {
     int english_review_count;
     int english_answer_state[APP_ENGLISH_WORD_COUNT];
     int settings_selection;
+    int settings_scroll;
+    int reader_font_index;
     int font_size_index;
     int line_spacing_index;
     int wifi_connected;

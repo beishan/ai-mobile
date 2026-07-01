@@ -56,7 +56,7 @@ int main(void) {
     font_t font;
     char line[32];
 
-    (void)reader_library_load_book_file(0, "assets/books/santi.txt");
+    (void)reader_library_load_external_books();
     app_init(&app);
     (void)app_persistence_load_app_file(APP_STATE_PATH, &app);
     gfx_init(&fb);

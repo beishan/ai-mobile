@@ -14,6 +14,7 @@ const reader_book_t *reader_library_book(int book_index);
 int reader_library_page_count(int book_index);
 const char *reader_library_source_text(int book_index);
 int reader_library_load_book_file(int book_index, const char *path);
+int reader_library_load_external_books(void);
 const char *reader_library_page_text(int book_index, int page_index);
 const char *reader_library_chapter_title(int book_index, int chapter_index);
 int reader_library_chapter_page(int book_index, int chapter_index);

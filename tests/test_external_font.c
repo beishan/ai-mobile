@@ -135,9 +135,9 @@ static void test_measure_text(void) {
     int width = external_font_measure_text(efont, "三体");
     ASSERT_EQ_INT(42, width);
 
-    /* "三体 百年孤独" = 7 chars (including space) = 147px */
+    /* "三体 百年孤独" = 6 CJK chars at 21px + one half-width space at 11px = 137px */
     width = external_font_measure_text(efont, "三体 百年孤独");
-    ASSERT_EQ_INT(147, width);
+    ASSERT_EQ_INT(137, width);
 
     /* Empty string */
     width = external_font_measure_text(efont, "");

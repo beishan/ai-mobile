@@ -72,6 +72,9 @@ void font_draw_text_aligned(const font_face_t *font, gfx_framebuffer_t *fb, int 
 void font_draw_text_box(const font_face_t *font, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, gfx_color_t color);
 void font_draw_text_box_spaced(const font_face_t *font, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color);
 void font_draw_ellipsis(const font_face_t *font, gfx_framebuffer_t *fb, int x, int y, int width, const char *text, gfx_color_t color);
+void font_draw_text_builtin(int size, gfx_framebuffer_t *fb, int x, int y, const char *text, gfx_color_t color);
+void font_draw_text_aligned_builtin(int size, gfx_framebuffer_t *fb, int x, int y, int width, const char *text, font_align_t align, gfx_color_t color);
+int font_measure_text_builtin(int size, const char *text);
 
 /* ====== Font Manager: manages external fonts by size ====== */
 
@@ -82,6 +85,7 @@ int font_manager_load_dir(const char *dirpath);
 /* Get an external font by requested size.
  * Returns the closest matching loaded external font, or NULL if none loaded. */
 const external_font_t *font_manager_get(int size);
+const external_font_t *font_manager_get_family(int family_index, int size);
 
 /* Check if external fonts are available for a given size */
 int font_manager_has_external(int size);
@@ -93,5 +97,7 @@ void font_manager_free_all(void);
 void font_draw_text_auto(int size, gfx_framebuffer_t *fb, int x, int y, const char *text, gfx_color_t color);
 void font_draw_text_aligned_auto(int size, gfx_framebuffer_t *fb, int x, int y, int width, const char *text, font_align_t align, gfx_color_t color);
 int font_measure_text_auto(int size, const char *text);
+void font_draw_text_box_spaced_auto(int size, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color);
+void font_draw_text_box_spaced_family(int size, int family_index, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color);
 
 #endif

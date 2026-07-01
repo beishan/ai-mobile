@@ -2,6 +2,7 @@
 
 #include "app/app_state.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
@@ -11,6 +12,8 @@
 #define READER_PAGE_TEXT_MAX 1024
 #define READER_AUTO_PAGE_BYTES 600
 #define READER_SOURCE_TEXT_MAX 4096
+#define READER_BOOK_PATH_MAX 512
+#define READER_META_TEXT_MAX 160
 
 typedef struct {
     reader_book_t info;
@@ -84,6 +87,11 @@ static char page_cache[APP_BOOK_COUNT][READER_MAX_PAGES][READER_PAGE_TEXT_MAX];
 static int page_cache_ready[APP_BOOK_COUNT];
 static char source_overrides[APP_BOOK_COUNT][READER_SOURCE_TEXT_MAX];
 static int source_override_ready[APP_BOOK_COUNT];
+static reader_book_t info_overrides[APP_BOOK_COUNT];
+static char title_overrides[APP_BOOK_COUNT][READER_META_TEXT_MAX];
+static char author_overrides[APP_BOOK_COUNT][READER_META_TEXT_MAX];
+static char size_overrides[APP_BOOK_COUNT][16];
+static int info_override_ready[APP_BOOK_COUNT];
 
 static const char *source_for_book(int book_index) {
     if (source_override_ready[book_index]) {
@@ -211,6 +219,9 @@ const reader_book_t *reader_library_book(int book_index) {
     if (book_index < 0 || book_index >= APP_BOOK_COUNT) {
         return NULL;
     }
+    if (info_override_ready[book_index]) {
+        return &info_overrides[book_index];
+    }
     return &books[book_index].info;
 }
 
@@ -252,6 +263,129 @@ int reader_library_load_book_file(int book_index, const char *path) {
     source_override_ready[book_index] = source_overrides[book_index][0] != '\0';
     page_cache_ready[book_index] = 0;
     return source_override_ready[book_index] ? 0 : -1;
+}
+
+static int has_txt_extension(const char *name) {
+    size_t len;
+    if (name == NULL) {
+        return 0;
+    }
+    len = strlen(name);
+    return len > 4 && strcmp(name + len - 4, ".txt") == 0;
+}
+
+static const char *path_basename(const char *path) {
+    const char *base = path;
+    if (path == NULL) {
+        return "";
+    }
+    for (const char *p = path; *p != '\0'; p++) {
+        if (*p == '/') {
+            base = p + 1;
+        }
+    }
+    return base;
+}
+
+static void copy_without_txt_extension(char *dest, size_t dest_size, const char *path) {
+    const char *base = path_basename(path);
+    size_t len = strlen(base);
+    if (len > 4 && strcmp(base + len - 4, ".txt") == 0) {
+        len -= 4;
+    }
+    if (dest == NULL || dest_size == 0) {
+        return;
+    }
+    if (len >= dest_size) {
+        len = dest_size - 1;
+    }
+    memcpy(dest, base, len);
+    dest[len] = '\0';
+}
+
+static void set_book_info_override(int book_index, const char *path) {
+    if (book_index < 0 || book_index >= APP_BOOK_COUNT || path == NULL) {
+        return;
+    }
+    copy_without_txt_extension(title_overrides[book_index], sizeof(title_overrides[book_index]), path);
+    strncpy(author_overrides[book_index], "本地书籍", sizeof(author_overrides[book_index]) - 1);
+    author_overrides[book_index][sizeof(author_overrides[book_index]) - 1] = '\0';
+    strncpy(size_overrides[book_index], "TXT", sizeof(size_overrides[book_index]) - 1);
+    size_overrides[book_index][sizeof(size_overrides[book_index]) - 1] = '\0';
+
+    info_overrides[book_index].title = title_overrides[book_index];
+    info_overrides[book_index].author = author_overrides[book_index];
+    info_overrides[book_index].size_label = "";
+    info_overrides[book_index].file_type = size_overrides[book_index];
+    info_overrides[book_index].chapter_title = title_overrides[book_index];
+    info_override_ready[book_index] = title_overrides[book_index][0] != '\0';
+}
+
+static void insert_sorted_path(char paths[][READER_BOOK_PATH_MAX], int *count, const char *path) {
+    int pos;
+    if (paths == NULL || count == NULL || path == NULL) {
+        return;
+    }
+    if (*count >= APP_BOOK_COUNT && strcmp(path, paths[APP_BOOK_COUNT - 1]) >= 0) {
+        return;
+    }
+
+    pos = *count < APP_BOOK_COUNT ? *count : APP_BOOK_COUNT - 1;
+    while (pos > 0 && strcmp(path, paths[pos - 1]) < 0) {
+        strncpy(paths[pos], paths[pos - 1], READER_BOOK_PATH_MAX - 1);
+        paths[pos][READER_BOOK_PATH_MAX - 1] = '\0';
+        pos--;
+    }
+    strncpy(paths[pos], path, READER_BOOK_PATH_MAX - 1);
+    paths[pos][READER_BOOK_PATH_MAX - 1] = '\0';
+    if (*count < APP_BOOK_COUNT) {
+        (*count)++;
+    }
+}
+
+static int collect_realbook_txt_paths(char paths[][READER_BOOK_PATH_MAX]) {
+    const char *dirpath = "assets/books/realbook";
+    DIR *dir = opendir(dirpath);
+    struct dirent *entry;
+    int count = 0;
+    if (dir == NULL) {
+        return 0;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        char path[READER_BOOK_PATH_MAX];
+        if (!has_txt_extension(entry->d_name)) {
+            continue;
+        }
+        snprintf(path, sizeof(path), "%s/%s", dirpath, entry->d_name);
+        insert_sorted_path(paths, &count, path);
+    }
+    closedir(dir);
+    return count;
+}
+
+int reader_library_load_external_books(void) {
+    static const char *fallback_paths[APP_BOOK_COUNT] = {
+        "assets/books/real_santi.txt",
+        "assets/books/real_bainian.txt",
+        "assets/books/real_huozhe.txt"
+    };
+    char realbook_paths[APP_BOOK_COUNT][READER_BOOK_PATH_MAX] = {{0}};
+    int realbook_count = collect_realbook_txt_paths(realbook_paths);
+    int loaded = 0;
+
+    for (int i = 0; i < realbook_count; i++) {
+        if (reader_library_load_book_file(i, realbook_paths[i]) == 0) {
+            set_book_info_override(i, realbook_paths[i]);
+            loaded++;
+        }
+    }
+    for (int i = realbook_count; i < APP_BOOK_COUNT; i++) {
+        if (reader_library_load_book_file(i, fallback_paths[i]) == 0) {
+            loaded++;
+        }
+    }
+    return loaded;
 }
 
 const char *reader_library_page_text(int book_index, int page_index) {

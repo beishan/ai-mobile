@@ -13,6 +13,7 @@
 
 #define APP_PERSISTENCE_CITY_COUNT 3
 #define APP_PERSISTENCE_FONT_COUNT 5
+#define APP_PERSISTENCE_READER_FONT_COUNT 4
 #define APP_PERSISTENCE_LINE_SPACING_COUNT 4
 
 static int clamp_int(int value, int min, int max) {
@@ -92,6 +93,7 @@ void app_persistence_capture(const app_state_t *app, app_persisted_state_t *snap
         snapshot->book_current_pages[i] = app->book_current_pages[i];
         snapshot->book_bookmark_pages[i] = app->book_bookmark_pages[i];
     }
+    snapshot->reader_font_index = app->reader_font_index;
     snapshot->font_size_index = app->font_size_index;
     snapshot->line_spacing_index = app->line_spacing_index;
     snapshot->wifi_connected = app->wifi_connected;
@@ -112,6 +114,7 @@ int app_persistence_apply(app_state_t *app, const app_persisted_state_t *snapsho
     }
     app->reader_page = app->book_current_pages[app->current_book];
     app->bookshelf_selection = app->current_book;
+    app->reader_font_index = clamp_int(snapshot->reader_font_index, 0, APP_PERSISTENCE_READER_FONT_COUNT - 1);
     app->font_size_index = clamp_int(snapshot->font_size_index, 0, APP_PERSISTENCE_FONT_COUNT - 1);
     app->line_spacing_index = clamp_int(snapshot->line_spacing_index, 0, APP_PERSISTENCE_LINE_SPACING_COUNT - 1);
     app->wifi_connected = normalize_bool(snapshot->wifi_connected);
@@ -133,6 +136,7 @@ int app_persistence_encode(const app_persisted_state_t *snapshot, char *buffer, 
                        "recent=%d\n"
                        "pages=%d,%d,%d\n"
                        "bookmarks=%d,%d,%d\n"
+                       "reader_font=%d\n"
                        "font=%d\n"
                        "spacing=%d\n"
                        "wifi=%d\n"
@@ -147,6 +151,7 @@ int app_persistence_encode(const app_persisted_state_t *snapshot, char *buffer, 
                        snapshot->book_bookmark_pages[0],
                        snapshot->book_bookmark_pages[1],
                        snapshot->book_bookmark_pages[2],
+                       snapshot->reader_font_index,
                        snapshot->font_size_index,
                        snapshot->line_spacing_index,
                        snapshot->wifi_connected,
@@ -169,12 +174,14 @@ int app_persistence_decode(const char *buffer, app_persisted_state_t *snapshot) 
         return -1;
     }
 
+    memset(&parsed, 0, sizeof(parsed));
     matched = sscanf(buffer,
                      "AIPERSIST %d\n"
                      "current=%d\n"
                      "recent=%d\n"
                      "pages=%d,%d,%d\n"
                      "bookmarks=%d,%d,%d\n"
+                     "reader_font=%d\n"
                      "font=%d\n"
                      "spacing=%d\n"
                      "wifi=%d\n"
@@ -189,13 +196,47 @@ int app_persistence_decode(const char *buffer, app_persisted_state_t *snapshot) 
                      &parsed.book_bookmark_pages[0],
                      &parsed.book_bookmark_pages[1],
                      &parsed.book_bookmark_pages[2],
+                     &parsed.reader_font_index,
                      &parsed.font_size_index,
                      &parsed.line_spacing_index,
                      &parsed.wifi_connected,
                      &parsed.weather_city_index,
                      &parsed.power_saving_enabled,
                      &consumed);
-    if (matched != 14 || parsed.version != APP_PERSISTENCE_VERSION) {
+    if (matched != 15) {
+        consumed = 0;
+        memset(&parsed, 0, sizeof(parsed));
+        matched = sscanf(buffer,
+                         "AIPERSIST %d\n"
+                         "current=%d\n"
+                         "recent=%d\n"
+                         "pages=%d,%d,%d\n"
+                         "bookmarks=%d,%d,%d\n"
+                         "font=%d\n"
+                         "spacing=%d\n"
+                         "wifi=%d\n"
+                         "city=%d\n"
+                         "power=%d\n%n",
+                         &parsed.version,
+                         &parsed.current_book,
+                         &parsed.recent_book,
+                         &parsed.book_current_pages[0],
+                         &parsed.book_current_pages[1],
+                         &parsed.book_current_pages[2],
+                         &parsed.book_bookmark_pages[0],
+                         &parsed.book_bookmark_pages[1],
+                         &parsed.book_bookmark_pages[2],
+                         &parsed.font_size_index,
+                         &parsed.line_spacing_index,
+                         &parsed.wifi_connected,
+                         &parsed.weather_city_index,
+                         &parsed.power_saving_enabled,
+                         &consumed);
+        if (matched != 14) {
+            return -1;
+        }
+    }
+    if (parsed.version != APP_PERSISTENCE_VERSION) {
         return -1;
     }
     while (buffer[consumed] != '\0') {

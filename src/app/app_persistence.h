@@ -14,6 +14,7 @@ typedef struct {
     int recent_book;
     int book_current_pages[APP_BOOK_COUNT];
     int book_bookmark_pages[APP_BOOK_COUNT];
+    int reader_font_index;
     int font_size_index;
     int line_spacing_index;
     int wifi_connected;

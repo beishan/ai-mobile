@@ -503,7 +503,6 @@ void external_font_draw_text_aligned(const external_font_t *efont, gfx_framebuff
 /* ====== Font Manager Implementation ====== */
 
 #define FONT_MGR_MAX_FONTS 16
-#define FONT_MGR_BUILTIN_SIZES 7
 
 static struct {
     external_font_t *fonts[FONT_MGR_MAX_FONTS];
@@ -511,25 +510,38 @@ static struct {
     int initialized;
 } font_mgr = {0};
 
-static int font_size_to_index(int size) {
-    switch (size) {
-        case 12: return 0;
-        case 14: return 1;
-        case 16: return 2;
-        case 18: return 3;
-        case 20: return 4;
-        case 22: return 5;
-        case 24: return 6;
-        default: return -1;
+static const font_face_t *font_builtin_face_for_size(int size) {
+    if (size <= 13) {
+        return font_get_face(FONT_SIZE_12);
     }
+    if (size <= 15) {
+        return font_get_face(FONT_SIZE_14);
+    }
+    if (size <= 17) {
+        return font_get_face(FONT_SIZE_16);
+    }
+    if (size <= 19) {
+        return font_get_face(FONT_SIZE_18);
+    }
+    if (size <= 21) {
+        return font_get_face(FONT_SIZE_20);
+    }
+    if (size <= 23) {
+        return font_get_face(FONT_SIZE_22);
+    }
+    return font_get_face(FONT_SIZE_24);
 }
 
-static font_size_t font_index_to_size(int index) {
-    const font_size_t sizes[] = {FONT_SIZE_12, FONT_SIZE_14, FONT_SIZE_16, FONT_SIZE_18, FONT_SIZE_20, FONT_SIZE_22, FONT_SIZE_24};
-    if (index < 0 || index >= FONT_MGR_BUILTIN_SIZES) {
-        return FONT_SIZE_16;
-    }
-    return sizes[index];
+void font_draw_text_builtin(int size, gfx_framebuffer_t *fb, int x, int y, const char *text, gfx_color_t color) {
+    font_draw_text(font_builtin_face_for_size(size), fb, x, y, text, color);
+}
+
+void font_draw_text_aligned_builtin(int size, gfx_framebuffer_t *fb, int x, int y, int width, const char *text, font_align_t align, gfx_color_t color) {
+    font_draw_text_aligned(font_builtin_face_for_size(size), fb, x, y, width, text, align, color);
+}
+
+int font_measure_text_builtin(int size, const char *text) {
+    return font_measure_text(font_builtin_face_for_size(size), text);
 }
 
 int font_manager_load_dir(const char *dirpath) {
@@ -621,6 +633,41 @@ const external_font_t *font_manager_get(int size) {
     return NULL;
 }
 
+const external_font_t *font_manager_get_family(int family_index, int size) {
+    const char *families[] = {"方正大黑", "汉仪正圆", "更纱黑体", "汉仪唐美人"};
+    const char *family;
+    const external_font_t *best = NULL;
+    int best_diff = 9999;
+
+    if (!font_mgr.initialized || font_mgr.count == 0) {
+        return NULL;
+    }
+    if (family_index < 0 || family_index >= (int)(sizeof(families) / sizeof(families[0]))) {
+        return font_manager_get(size);
+    }
+
+    family = families[family_index];
+    for (int i = 0; i < font_mgr.count; i++) {
+        int diff;
+        if (font_mgr.fonts[i] == NULL || !font_mgr.fonts[i]->loaded) {
+            continue;
+        }
+        if (strstr(font_mgr.fonts[i]->name, family) == NULL) {
+            continue;
+        }
+        diff = font_mgr.fonts[i]->height - size;
+        if (diff < 0) {
+            diff = -diff;
+        }
+        if (diff < best_diff) {
+            best_diff = diff;
+            best = font_mgr.fonts[i];
+        }
+    }
+
+    return best != NULL ? best : font_manager_get(size);
+}
+
 int font_manager_has_external(int size) {
     return font_manager_get(size) != NULL ? 1 : 0;
 }
@@ -642,9 +689,7 @@ void font_draw_text_auto(int size, gfx_framebuffer_t *fb, int x, int y, const ch
     if (efont != NULL) {
         external_font_draw_text(efont, fb, x, y, text, color);
     } else {
-        int idx = font_size_to_index(size);
-        const font_face_t *face = font_get_face(font_index_to_size(idx));
-        font_draw_text(face, fb, x, y, text, color);
+        font_draw_text_builtin(size, fb, x, y, text, color);
     }
 }
 
@@ -653,9 +698,7 @@ void font_draw_text_aligned_auto(int size, gfx_framebuffer_t *fb, int x, int y, 
     if (efont != NULL) {
         external_font_draw_text_aligned(efont, fb, x, y, width, text, align, color);
     } else {
-        int idx = font_size_to_index(size);
-        const font_face_t *face = font_get_face(font_index_to_size(idx));
-        font_draw_text_aligned(face, fb, x, y, width, text, align, color);
+        font_draw_text_aligned_builtin(size, fb, x, y, width, text, align, color);
     }
 }
 
@@ -664,8 +707,64 @@ int font_measure_text_auto(int size, const char *text) {
     if (efont != NULL) {
         return external_font_measure_text(efont, text);
     } else {
-        int idx = font_size_to_index(size);
-        const font_face_t *face = font_get_face(font_index_to_size(idx));
-        return font_measure_text(face, text);
+        return font_measure_text_builtin(size, text);
     }
+}
+
+static void font_draw_text_box_spaced_external(const external_font_t *efont, int size,
+                                               gfx_framebuffer_t *fb, int x, int y, int width, int height,
+                                               const char *text, int line_height, gfx_color_t color) {
+    const unsigned char *cursor = (const unsigned char *)text;
+    int line_x = x;
+    int line_y = y;
+    int glyph_height;
+
+    if (fb == NULL || text == NULL) {
+        return;
+    }
+    if (efont == NULL) {
+        font_draw_text_box_spaced(font_builtin_face_for_size(size), fb, x, y, width, height, text, line_height, color);
+        return;
+    }
+
+    glyph_height = efont->height;
+    if (line_height < glyph_height) {
+        line_height = glyph_height;
+    }
+    while (*cursor != '\0' && line_y + glyph_height <= y + height) {
+        const unsigned char *before = cursor;
+        uint32_t cp;
+        int advance;
+        char tmp[5] = {0};
+        int len;
+
+        if (!font_decode_utf8(&cursor, &cp)) {
+            break;
+        }
+        if (cp == '\n') {
+            line_x = x;
+            line_y += line_height;
+            continue;
+        }
+        advance = (cp < 128) ? (efont->width + 1) / 2 : efont->width;
+        if (line_x > x && line_x + advance > x + width) {
+            line_x = x;
+            line_y += line_height;
+        }
+        if (line_y + glyph_height > y + height) {
+            break;
+        }
+        len = (int)(cursor - before);
+        memcpy(tmp, before, (size_t)len);
+        external_font_draw_text(efont, fb, line_x, line_y, tmp, color);
+        line_x += advance;
+    }
+}
+
+void font_draw_text_box_spaced_auto(int size, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color) {
+    font_draw_text_box_spaced_external(font_manager_get(size), size, fb, x, y, width, height, text, line_height, color);
+}
+
+void font_draw_text_box_spaced_family(int size, int family_index, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color) {
+    font_draw_text_box_spaced_external(font_manager_get_family(family_index, size), size, fb, x, y, width, height, text, line_height, color);
 }
