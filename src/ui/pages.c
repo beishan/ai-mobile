@@ -7,7 +7,7 @@
 #include <string.h>
 #include <time.h>
 
-#define STATUS_BAR_HEIGHT 24
+#define STATUS_BAR_HEIGHT 32
 
 /* Shared 480x800 portrait layout constants.
  * Content area sits below the status bar and stays inside the side margins. */
@@ -38,8 +38,6 @@ static void settings_draw_line(gfx_framebuffer_t *fb, int x0, int y0, int x1, in
 static void settings_draw_arc(gfx_framebuffer_t *fb, int cx, int cy, int r, int q1, int q2, int q3, int q4);
 static void settings_draw_icon(gfx_framebuffer_t *fb, settings_icon_t icon, int x, int y);
 static void settings_draw_arrow(gfx_framebuffer_t *fb, int x, int y);
-static void status_draw_wifi(gfx_framebuffer_t *fb, int cx, int cy);
-static void status_draw_battery(gfx_framebuffer_t *fb, int x, int y, int percent);
 static void bookshelf_status_bar(gfx_framebuffer_t *fb);
 
 static void ui_now(struct tm *out) {
@@ -130,7 +128,7 @@ static void draw_battery_icon(gfx_framebuffer_t *fb, int x, int y, int percent, 
 }
 
 static void home_status_bar(gfx_framebuffer_t *fb, const font_t *font) {
-    const font_face_t *small = font_get_face(FONT_SIZE_12);
+    const font_face_t *small = font_get_face(FONT_SIZE_14);
     int text_y = (STATUS_BAR_HEIGHT - small->size) / 2;
     int wifi_y = (STATUS_BAR_HEIGHT - 18) / 2;
     int battery_y = (STATUS_BAR_HEIGHT - 18) / 2;
@@ -139,11 +137,10 @@ static void home_status_bar(gfx_framebuffer_t *fb, const font_t *font) {
     (void)font;
     ui_format_time(time_text, sizeof(time_text));
     snprintf(status_text, sizeof(status_text), "%s  晴 26C 北京", time_text);
-    gfx_fill_rect(fb, 0, 0, GFX_WIDTH, STATUS_BAR_HEIGHT, GFX_BLACK);
-    font_draw_text(small, fb, 8, text_y, status_text, GFX_WHITE);
-    draw_wifi_icon(fb, GFX_WIDTH - 90, wifi_y, GFX_WHITE);
-    draw_battery_icon(fb, GFX_WIDTH - 66, battery_y, 78, GFX_WHITE);
-    font_draw_text(small, fb, GFX_WIDTH - 36, text_y, "78%", GFX_WHITE);
+    font_draw_text(small, fb, 8, text_y, status_text, GFX_BLACK);
+    draw_wifi_icon(fb, GFX_WIDTH - 90, wifi_y, GFX_BLACK);
+    draw_battery_icon(fb, GFX_WIDTH - 66, battery_y, 78, GFX_BLACK);
+    font_draw_text(small, fb, GFX_WIDTH - 36, text_y, "78%", GFX_BLACK);
 }
 
 /* Info card shown above the app grid on the home screen.
@@ -344,14 +341,7 @@ static bookshelf_display_book_t bookshelf_book_for_index(int index) {
 }
 
 static void bookshelf_status_bar(gfx_framebuffer_t *fb) {
-    const font_face_t *normal = font_get_face(FONT_SIZE_18);
-    const font_face_t *small = font_get_face(FONT_SIZE_14);
-    char time_text[8];
-    ui_format_time(time_text, sizeof(time_text));
-    font_draw_text(normal, fb, 18, 14, time_text, GFX_BLACK);
-    status_draw_wifi(fb, 394, 20);
-    status_draw_battery(fb, 414, 13, 78);
-    font_draw_text(small, fb, 443, 13, "78%", GFX_BLACK);
+    home_status_bar(fb, NULL);
 }
 
 static void draw_bookshelf_file_cover(gfx_framebuffer_t *fb, int x, int y, int w, int h, const char *type) {
@@ -697,7 +687,6 @@ static void reader_catalog_draw_triangle(gfx_framebuffer_t *fb, int x, int y) {
 
 static void render_reader_catalog(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
     int chapter_count = reader_library_chapter_count(app->current_book);
-    (void)font;
 
     for (int i = 0; i < chapter_count && i < 9; i++) {
         int row_y = 22 + i * 52;
@@ -714,6 +703,7 @@ static void render_reader_catalog(gfx_framebuffer_t *fb, const app_state_t *app,
                                reader_library_chapter_title(app->current_book, i), GFX_BLACK);
         font_draw_text_aligned_builtin(20, fb, 386, row_y + 17, 60, page_text, FONT_ALIGN_RIGHT, GFX_BLACK);
     }
+    home_status_bar(fb, font);
 }
 
 static void draw_weather_digit(gfx_framebuffer_t *fb, int x, int y, char digit) {
@@ -766,12 +756,12 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
 
     gfx_fill_rect(fb, 20, 770, 440, 1, GFX_BLACK);
     snprintf(percent_text, sizeof(percent_text), "%d", percent);
-    font_draw_text_builtin(20, fb, 28, 779, percent_text, GFX_BLACK);
-    font_draw_text_builtin(14, fb, 58, 783, "%", GFX_BLACK);
+    font_draw_text_builtin(14, fb, 28, 782, percent_text, GFX_BLACK);
+    font_draw_text_builtin(14, fb, 50, 782, "%", GFX_BLACK);
 
     snprintf(chapter_progress, sizeof(chapter_progress), "本章 %d / %d  |  全书还剩 %d 页",
              current_page, total_pages, total_pages > current_page ? total_pages - current_page : 0);
-    font_draw_text_aligned_builtin(14, fb, 250, 783, 205, chapter_progress, FONT_ALIGN_RIGHT, GFX_BLACK);
+    font_draw_text_aligned_builtin(14, fb, 250, 782, 205, chapter_progress, FONT_ALIGN_RIGHT, GFX_BLACK);
 
     if (app->reader_menu_open) {
         const font_face_t *menu = font_get_face(FONT_SIZE_18);
@@ -1039,14 +1029,7 @@ static void render_calendar(gfx_framebuffer_t *fb, const app_state_t *app, const
 
     snprintf(month_title, sizeof(month_title), "%d年%d月", year, month);
 
-    {
-        char time_text[8];
-        ui_format_time(time_text, sizeof(time_text));
-        font_draw_text_builtin(18, fb, 24, 14, time_text, GFX_BLACK);
-    }
-    status_draw_wifi(fb, 394, 20);
-    status_draw_battery(fb, 414, 13, 80);
-    font_draw_text_builtin(14, fb, 443, 13, "80%", GFX_BLACK);
+    home_status_bar(fb, font);
 
     calendar_draw_chevron(fb, 42, 50, 0);
     font_draw_text_aligned_builtin(20, fb, 0, 47, GFX_WIDTH, month_title, FONT_ALIGN_CENTER, GFX_BLACK);
@@ -1246,49 +1229,8 @@ static void settings_draw_arc(gfx_framebuffer_t *fb, int cx, int cy, int r, int 
     }
 }
 
-static void status_draw_sun(gfx_framebuffer_t *fb, int cx, int cy) {
-    settings_draw_circle(fb, cx, cy, 5, 2, GFX_BLACK);
-    gfx_fill_rect(fb, cx - 1, cy - 11, 2, 4, GFX_BLACK);
-    gfx_fill_rect(fb, cx - 1, cy + 7, 2, 4, GFX_BLACK);
-    gfx_fill_rect(fb, cx - 11, cy - 1, 4, 2, GFX_BLACK);
-    gfx_fill_rect(fb, cx + 7, cy - 1, 4, 2, GFX_BLACK);
-    settings_draw_line(fb, cx - 8, cy - 8, cx - 6, cy - 6, 2, GFX_BLACK);
-    settings_draw_line(fb, cx + 8, cy - 8, cx + 6, cy - 6, 2, GFX_BLACK);
-    settings_draw_line(fb, cx - 8, cy + 8, cx - 6, cy + 6, 2, GFX_BLACK);
-    settings_draw_line(fb, cx + 8, cy + 8, cx + 6, cy + 6, 2, GFX_BLACK);
-}
-
-static void status_draw_wifi(gfx_framebuffer_t *fb, int cx, int cy) {
-    settings_draw_arc(fb, cx, cy + 6, 11, 1, 1, 0, 0);
-    settings_draw_arc(fb, cx, cy + 6, 8, 1, 1, 0, 0);
-    settings_draw_arc(fb, cx, cy + 6, 5, 1, 1, 0, 0);
-    settings_fill_circle(fb, cx, cy + 6, 2, GFX_BLACK);
-}
-
-static void status_draw_battery(gfx_framebuffer_t *fb, int x, int y, int percent) {
-    int fill = percent * 17 / 100;
-    gfx_draw_rect(fb, x, y, 24, 14, GFX_BLACK);
-    gfx_draw_rect(fb, x + 1, y + 1, 22, 12, GFX_BLACK);
-    gfx_fill_rect(fb, x + 25, y + 4, 2, 6, GFX_BLACK);
-    gfx_fill_rect(fb, x + 4, y + 4, fill, 6, GFX_BLACK);
-}
-
 static void settings_status_bar(gfx_framebuffer_t *fb) {
-    const font_face_t *small = font_get_face(FONT_SIZE_14);
-    char time_text[32];
-    char status_text[48];
-    ui_format_time(time_text, sizeof(time_text));
-    snprintf(status_text, sizeof(status_text), "%s  晴 26", time_text);
-
-    status_draw_sun(fb, 30, 21);
-    font_draw_text(small, fb, 52, 13, status_text, GFX_BLACK);
-    settings_draw_circle(fb, 130, 14, 2, 1, GFX_BLACK);
-    font_draw_text(small, fb, 136, 13, "C", GFX_BLACK);
-
-    status_draw_wifi(fb, 388, 20);
-    status_draw_battery(fb, 410, 13, 86);
-    font_draw_text(small, fb, 438, 13, "86%", GFX_BLACK);
-    gfx_fill_rect(fb, 0, 40, GFX_WIDTH, 1, GFX_BLACK);
+    home_status_bar(fb, NULL);
 }
 
 static void settings_draw_icon(gfx_framebuffer_t *fb, settings_icon_t icon, int x, int y) {

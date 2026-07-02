@@ -17,7 +17,7 @@
 
 #define ASSERT_TRUE(expr) do { if (!(expr)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 #define ASSERT_EQ_INT(expected, actual) ASSERT_TRUE((expected) == (actual))
-#define TEST_STATUS_BAR_HEIGHT 24
+#define TEST_STATUS_BAR_HEIGHT 32
 
 static int count_color(const gfx_framebuffer_t *fb, gfx_color_t color) {
     int count = 0;
@@ -281,19 +281,19 @@ static void test_home_status_bar_content_is_vertically_centered(void) {
     app.page = APP_PAGE_HOME;
     ui_render_page(&fb, &app, &font);
 
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 8, 4, 180, 1) == 0);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 8, 16, 180, 1) > 0);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 0, 1, GFX_WIDTH, 2) == 0);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 0, 21, GFX_WIDTH, 2) == 0);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, 8, 6, 180, 12) > 20);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_WHITE, GFX_WIDTH - 90, 6, 80, 12) > 20);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 8, 6, 180, 1) == 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 8, 21, 180, 1) > 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 1, GFX_WIDTH, 2) == 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 29, GFX_WIDTH, 2) == 0);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 8, 8, 180, 16) > 28);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, GFX_WIDTH - 92, 8, 84, 16) > 28);
     font_free(&font);
 }
 
 static void assert_uses_home_status_bar(gfx_framebuffer_t *fb) {
-    ASSERT_TRUE(count_color_in_region(fb, GFX_BLACK, 0, 0, GFX_WIDTH, TEST_STATUS_BAR_HEIGHT) > 10000);
-    ASSERT_TRUE(count_color_in_region(fb, GFX_WHITE, 8, 4, 180, 16) > 20);
-    ASSERT_TRUE(count_color_in_region(fb, GFX_WHITE, GFX_WIDTH - 92, 4, 84, 16) > 20);
+    ASSERT_TRUE(count_color_in_region(fb, GFX_BLACK, 0, 0, GFX_WIDTH, TEST_STATUS_BAR_HEIGHT) < 2500);
+    ASSERT_TRUE(count_color_in_region(fb, GFX_BLACK, 8, 6, 180, 20) > 28);
+    ASSERT_TRUE(count_color_in_region(fb, GFX_BLACK, GFX_WIDTH - 92, 6, 84, 20) > 28);
 }
 
 static void assert_uses_bookshelf_status_bar(gfx_framebuffer_t *fb) {
@@ -305,7 +305,12 @@ static void assert_uses_bookshelf_status_bar(gfx_framebuffer_t *fb) {
 static void test_non_reader_pages_use_home_status_bar_style(void) {
     app_page_t pages[] = {
         APP_PAGE_HOME,
+        APP_PAGE_BOOKSHELF,
+        APP_PAGE_READER,
+        APP_PAGE_READER_CATALOG,
+        APP_PAGE_READER_SETTINGS,
         APP_PAGE_WEATHER,
+        APP_PAGE_CALENDAR,
         APP_PAGE_ENGLISH,
         APP_PAGE_SETTINGS,
         APP_PAGE_ABOUT
@@ -319,13 +324,16 @@ static void test_non_reader_pages_use_home_status_bar_style(void) {
         gfx_init(&fb);
         app_init(&app);
         app.page = pages[i];
+        if (pages[i] == APP_PAGE_READER_CATALOG || pages[i] == APP_PAGE_READER_SETTINGS) {
+            app.current_book = 0;
+        }
         ui_render_page(&fb, &app, &font);
         assert_uses_home_status_bar(&fb);
     }
     font_free(&font);
 }
 
-static void test_reader_keeps_reading_status_bar_style(void) {
+static void test_reader_uses_unified_status_bar_style(void) {
     gfx_framebuffer_t fb;
     app_state_t app;
     font_t font;
@@ -336,8 +344,7 @@ static void test_reader_keeps_reading_status_bar_style(void) {
     app.page = APP_PAGE_READER;
     ui_render_page(&fb, &app, &font);
 
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 0, GFX_WIDTH, TEST_STATUS_BAR_HEIGHT) < GFX_WIDTH * TEST_STATUS_BAR_HEIGHT / 3);
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 0, 40));
+    assert_uses_home_status_bar(&fb);
     font_free(&font);
 }
 
@@ -493,9 +500,9 @@ static void test_reader_catalog_matches_design2_skeleton(void) {
     app.reader_page = reader_library_chapter_page(app.current_book, 1);
     ui_render_page(&fb, &app, &font);
 
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 0, 20, 80) < 5);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 210, 24, 70, 42) < 70);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 66, GFX_WIDTH, 2) < 40);
+    assert_uses_home_status_bar(&fb);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 210, 34, 70, 32) < 70);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 66, GFX_WIDTH, 2) < 80);
     ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 40, 34, 360, 260) > 500);
     ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 14, 62, 452, 52) > 220);
     ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 735, GFX_WIDTH, 65) < 20);
@@ -944,10 +951,8 @@ static void test_reader_main_matches_design_skeleton(void) {
     app.reader_page = 0;
     ui_render_page(&fb, &app, &font);
 
-    /* Reader design uses the same white status bar and separator as settings. */
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 0, GFX_WIDTH, 40) > 80);
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 0, 40));
-    ASSERT_EQ_INT(GFX_BLACK, gfx_get_pixel(&fb, 479, 40));
+    /* Reader uses the unified white status bar. */
+    assert_uses_home_status_bar(&fb);
 
     /* Reader chrome keeps only status bar and body content; no duplicate book/chapter headings. */
     ASSERT_TRUE(!file_contains("src/ui/pages.c", "breadcrumb"));
@@ -959,9 +964,11 @@ static void test_reader_main_matches_design_skeleton(void) {
 
     /* Bottom progress rule plus left and right footer text. */
     ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 20, 770, 440, 1) > 400);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 28, 779, 58, 17) > 55);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 285, 783, 170, 14) > 55);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 28, 764, 72, 5) < 20);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 28, 781, 58, 14) > 40);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 28, 774, 58, 6) < 8);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 285, 781, 170, 14) > 55);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 28, 796, 72, 3) < 8);
+    ASSERT_TRUE(!file_contains("src/ui/pages.c", "font_draw_text_builtin(20, fb, 28, 779"));
     font_free(&font);
 }
 
@@ -1465,7 +1472,7 @@ int main(void) {
     test_home_icons_use_modern_line_style_without_large_solid_blocks();
     test_home_status_bar_content_is_vertically_centered();
     test_non_reader_pages_use_home_status_bar_style();
-    test_reader_keeps_reading_status_bar_style();
+    test_reader_uses_unified_status_bar_style();
     test_bookshelf_and_reader_keep_progress();
     test_reader_menu_opens_reader_settings_and_applies();
     test_reader_menu_opens_full_catalog_page_and_selects_chapter();
