@@ -25,9 +25,10 @@ app_button_t sdl_display_button_from_key(SDL_Keycode key) {
         case SDLK_h:
             return APP_BUTTON_HOME;
         case SDLK_BACKSPACE:
-        case SDLK_ESCAPE:
         case SDLK_p:
             return APP_BUTTON_POWER;
+        case SDLK_ESCAPE:
+            return APP_BUTTON_BACK;
         default:
             return (app_button_t)-1;
     }

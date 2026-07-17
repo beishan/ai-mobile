@@ -1,29 +1,29 @@
 # Development Progress
 
-Updated: 2026-06-23
+Updated: 2026-07-17
 
 ## Current Target
 
-- ESP32 N16R8.
+- ESP32-S3 N16R8.
 - 4.26 inch 480 x 800 black/white high-refresh E-Ink panel.
-- SSD677 driver IC over SPI.
-- Reader-first product scope with six modules: reading, weather, calendar, English, settings, and about.
+- SSD1677 driver IC over SPI.
+- Reader-first product scope with seven modules: reading, SD files, weather, calendar, English, settings, and about.
 
 ## Completed
 
 - Merged `feature/reader-simulator` into `main`.
-- Re-centered the codebase on the current 480 x 800 black/white SSD677 target.
+- Re-centered the codebase on the current 480 x 800 black/white SSD1677 target.
 - Updated `gfx` dimensions to 480 x 800.
 - Reduced logical colors to white and black.
 - Updated EPD packing to a single 48,000-byte `bw` plane.
 - Removed the interactive entertainment module from the shared app state, home navigation, icons, and UI rendering.
 - Kept the reader flow from the simulator branch:
-  - Shared source-text content catalog in `src/app/reader_library.c`.
+  - SD-backed TXT library in `src/app/reader_library.c`: keeps metadata/page offsets and reads each rendered page from the card.
   - Bookshelf selection.
   - Per-book page progress.
-  - Per-page reader text generated from source text into a small page cache.
+  - Per-page reader text loaded from the selected SD file when it is rendered.
   - Plain text can be split automatically when no explicit form-feed page breaks are present.
-  - Desktop simulator startup loads `assets/books/santi.txt` into the first book when available.
+  - Desktop simulator startup indexes TXT files under `assets/books/realbook`; no built-in book-text fallback is provided.
   - Recent book marker.
   - Reader menu.
   - Catalog overlay.
@@ -35,8 +35,13 @@ Updated: 2026-06-23
   - English front/back learning flow.
   - Settings state updates.
 - Updated ESP platform files:
-  - `src/platform/esp_board_config.h` names the SSD677 target and 480 x 800 panel constants.
-  - `src/platform/esp_display.c` logs SSD677 black/white packed frame statistics.
+  - `src/platform/esp_board_config.h` names the SSD1677 target and 480 x 800 panel constants.
+  - `src/platform/ssd1677.c` implements controller setup, full RAM writes, OTP full refresh, windowed differential partial refresh, BUSY synchronization, power-off, and deep sleep.
+  - `src/platform/esp_display.c` connects the portable command driver to ESP-IDF GPIO/SPI.
+  - `src/platform/esp_sd.c` mounts a FAT SPI SD card on the shared E-Ink bus, using independent chip-select pins.
+  - Firmware loads up to three sorted UTF-8 `.txt` files from `/sdcard/books` before initializing bookshelf page counts.
+  - Portrait UI pixels are rotated into the SSD1677 panel's native 800 x 480 RAM order.
+  - The 384,000-byte UI framebuffer is allocated from ESP32-S3 Octal PSRAM rather than the main task stack.
   - `src/platform/epd_frame.c` packs black pixels into one 1bpp plane.
 - Retargeted all 8 UI pages to true 480×800 portrait layout:
   - Defined shared layout constants (`PAGE_MARGIN_X`, `CONTENT_WIDTH`, `BODY_TOP`, `BODY_BOTTOM`, `BODY_HEIGHT`) in `src/ui/pages.c` replacing scattered magic numbers.
@@ -58,7 +63,8 @@ Updated: 2026-06-23
   - Tests cover round trip, clamping, malformed payload rejection, and file save/load.
 - Added ESP32 button debounce:
   - `src/platform/input_debounce.c` provides a portable stable-sample debounce state machine.
-  - `src/platform/esp_input.c` uses a 60ms debounce window for POWER/UP/HOME/DOWN before emitting app button events.
+  - `src/platform/esp_input.c` scans BACK/POWER/UP/HOME/DOWN in a dedicated 20ms FreeRTOS task, uses 40ms debounce, and queues events during blocking E-Ink refresh; BACK is wired to GPIO42.
+  - `src/platform/esp_time_sync.c` stores Wi-Fi credentials in NVS, connects as a station, synchronizes China Standard Time from NTP, and the settings page provides button-only SSID/password entry.
   - Tests cover bounce suppression, re-arm after release, and ESP wiring.
 - Added POWER long-press handling:
   - `input_debounce_update_hold` distinguishes short press on release from long press while held.
@@ -71,26 +77,30 @@ Updated: 2026-06-23
 
 ## Verification
 
-Latest successful checks:
+Latest successful checks on 2026-07-17:
 
 ```bash
-make -B test
-make reader_sim
-make reader_sim_sdl
-./reader_sim
 pio run -e esp32-n16r8
 ```
 
-Latest test result:
+Build result:
 
 ```text
-tests passed
+SUCCESS
+RAM: 102,464 / 327,680 bytes (31.3%)
+Flash: 995,905 / 5,242,880 bytes (19.0%)
 ```
+
+The standalone host smoke test also passes for portrait-to-native frame packing,
+SSD1677 initialization, previous/current RAM writes, full refresh, BUSY waits,
+power-off, and deep sleep. The command sequence, BUSY polarity, and GPIO wiring
+were aligned with the successfully run `ping_test` project.
 
 ## In Progress
 
-- Real SSD677 command sequence, LUT/waveform, update trigger, and hardware sleep command behavior.
-- Real file ingestion for TXT, including UTF-8/GBK detection and pagination, behind the `reader_library` interface.
+- Real-device validation of SSD1677 orientation, BUSY polarity, full refresh, repeated updates, sleep, and wake.
+- Hardware-validate the implemented home-selection partial refresh after the EPD BUSY/wiring fault is resolved.
+- Real-device validation of SD mount, shared-bus arbitration, and TXT loading; GBK detection remains future work.
 - Real weather/network integration.
 
 ## Useful Commands

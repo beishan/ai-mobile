@@ -1,5 +1,6 @@
 #include "ui/pages.h"
 #include "ui/icons.h"
+#include "app/file_browser.h"
 #include "app/reader_library.h"
 
 #include <stdio.h>
@@ -196,7 +197,7 @@ static void home_info_card(gfx_framebuffer_t *fb, const app_state_t *app, int x,
     font_draw_text(city_font, fb, text_x, y + h / 2 + 6, cities[city], GFX_BLACK);
 
     char clock_text[8];
-    char date_text[32];
+    char date_text[64];
     struct tm now_tm;
     ui_now(&now_tm);
     snprintf(clock_text, sizeof(clock_text), "%02d:%02d", now_tm.tm_hour, now_tm.tm_min);
@@ -226,10 +227,39 @@ static void app_tile(gfx_framebuffer_t *fb, const font_t *font, ui_icon_kind_t i
     font_draw_text_aligned(label_font, fb, x, text_y, w, label, FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
+int ui_home_tile_bounds(int index, int *x, int *y, int *width, int *height) {
+    const int cols = 3;
+    const int rows = 3;
+    const int gap = 18;
+    const int tile_w = 108;
+    const int tile_h = 96;
+    const int card_y = BODY_TOP + 8;
+    const int grid_top = card_y + 120 + 24;
+    const int total_w = cols * tile_w + (cols - 1) * gap;
+    const int total_h = rows * tile_h + (rows - 1) * gap;
+    const int start_x = (GFX_WIDTH - total_w) / 2;
+    const int start_y = grid_top + (BODY_BOTTOM - grid_top - total_h) / 2;
+    int col;
+    int row;
+
+    if (index < 0 || index >= 7 || x == NULL || y == NULL ||
+        width == NULL || height == NULL) {
+        return -1;
+    }
+    col = index == 6 ? 1 : index % cols;
+    row = index / cols;
+    *x = start_x + col * (tile_w + gap);
+    *y = start_y + row * (tile_h + gap);
+    *width = tile_w;
+    *height = tile_h;
+    return 0;
+}
+
 static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    const char *items[] = {"阅读", "天气", "日历", "英语", "设置", "关于"};
+    const char *items[] = {"阅读", "文件", "天气", "日历", "英语", "设置", "关于"};
     const ui_icon_kind_t icons[] = {
         UI_ICON_READER,
+        UI_ICON_FILES,
         UI_ICON_WEATHER,
         UI_ICON_CALENDAR,
         UI_ICON_ENGLISH,
@@ -247,26 +277,16 @@ static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const fon
     const int card_y = BODY_TOP + 8;
     home_info_card(fb, app, card_x, card_y, card_w, card_h);
 
-    /* 3 columns x 2 rows grid, centered below the info card, NOT filling the screen. */
-    const int cols = 3;
-    const int rows = 2;
-    const int gap = 24;
-    const int tile_w = 108;
-    const int tile_h = 96;
-    const int total_w = cols * tile_w + (cols - 1) * gap;
-    const int total_h = rows * tile_h + (rows - 1) * gap;
-    const int grid_top = card_y + card_h + 24;
-    const int grid_bottom = BODY_BOTTOM;
-    const int grid_avail = grid_bottom - grid_top;
-    const int start_x = (GFX_WIDTH - total_w) / 2;
-    const int start_y = grid_top + (grid_avail - total_h) / 2;
-
-    for (int i = 0; i < 6; i++) {
-        int col = i % cols;
-        int row = i / cols;
-        int x = start_x + col * (tile_w + gap);
-        int y = start_y + row * (tile_h + gap);
-        app_tile(fb, font, icons[i], x, y, tile_w, tile_h, items[i], app->home_selection == i);
+    /* Seven entries in a 3-column grid; the last entry is centered. */
+    for (int i = 0; i < 7; i++) {
+        int x;
+        int y;
+        int width;
+        int height;
+        if (ui_home_tile_bounds(i, &x, &y, &width, &height) == 0) {
+            app_tile(fb, font, icons[i], x, y, width, height,
+                     items[i], app->home_selection == i);
+        }
     }
 }
 
@@ -285,6 +305,7 @@ typedef struct {
     bookshelf_cover_style_t style;
 } bookshelf_display_book_t;
 
+#if 0 /* Retired mock bookshelf data: SD metadata is used at runtime. */
 static const bookshelf_display_book_t bookshelf_books[] = {
     {"活着", "余华", "TXT", BOOKSHELF_COVER_INK},
     {"人间值得", "中村恒子", "EPUB", BOOKSHELF_COVER_INK},
@@ -296,6 +317,7 @@ static const bookshelf_display_book_t bookshelf_books[] = {
     {"三体（全三册）", "刘慈欣", "TXT", BOOKSHELF_COVER_RIVER},
     {"读书笔记合集", "2024-01-10", "TXT", BOOKSHELF_COVER_FILE}
 };
+#endif
 
 static size_t utf8_clip_bytes(const char *text, size_t max_bytes) {
     size_t len;
@@ -326,16 +348,89 @@ static void copy_short_text(char *dest, size_t dest_size, const char *text, size
     dest[len] = '\0';
 }
 
-static bookshelf_display_book_t bookshelf_book_for_index(int index) {
-    bookshelf_display_book_t display = bookshelf_books[index];
-    if (index < APP_BOOK_COUNT) {
-        const reader_book_t *book = reader_library_book(index);
-        if (book != NULL) {
-            copy_short_text(display.title, sizeof(display.title), book->title, 24);
-            copy_short_text(display.author, sizeof(display.author), book->author, 18);
-            copy_short_text(display.file_type, sizeof(display.file_type), book->file_type, 8);
-            display.style = BOOKSHELF_COVER_FILE;
+static void file_browser_draw_icon(gfx_framebuffer_t *fb, int x, int y, int directory, gfx_color_t color) {
+    if (directory) {
+        gfx_draw_rect(fb, x, y + 8, 38, 28, color);
+        gfx_fill_rect(fb, x, y + 3, 17, 6, color);
+    } else {
+        gfx_draw_rect(fb, x + 5, y, 28, 38, color);
+        settings_draw_line(fb, x + 24, y, x + 33, y + 9, 1, color);
+        gfx_fill_rect(fb, x + 11, y + 16, 16, 1, color);
+        gfx_fill_rect(fb, x + 11, y + 23, 16, 1, color);
+        gfx_fill_rect(fb, x + 11, y + 30, 12, 1, color);
+    }
+}
+
+static void render_file_browser(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
+    const int visible_rows = 8;
+    const int row_height = 78;
+    const int list_top = 92;
+    int count = file_browser_count();
+    int selection = app->file_browser_selection;
+    int start = selection >= visible_rows ? selection - visible_rows + 1 : 0;
+    char current_path[FILE_BROWSER_PATH_MAX];
+
+    home_status_bar(fb, font);
+    copy_short_text(current_path, sizeof(current_path), file_browser_current_path(), 48);
+    font_draw_text_builtin(20, fb, 24, 47, "SD 文件浏览器", GFX_BLACK);
+    font_draw_text_aligned_builtin(14, fb, 190, 51, 266, current_path, FONT_ALIGN_RIGHT, GFX_BLACK);
+    gfx_fill_rect(fb, 20, 78, 440, 1, GFX_BLACK);
+
+    if (count <= 0) {
+        font_draw_text_aligned_builtin(20, fb, 24, 280, 432,
+                                       "SD 卡不可用或目录为空", FONT_ALIGN_CENTER, GFX_BLACK);
+        font_draw_text_aligned_builtin(14, fb, 24, 330, 432,
+                                       "检查卡、供电和 SPI 接线", FONT_ALIGN_CENTER, GFX_BLACK);
+    }
+
+    for (int row = 0; row < visible_rows; row++) {
+        int index = start + row;
+        int y = list_top + row * row_height;
+        const file_browser_entry_t *entry;
+        char name[FILE_BROWSER_NAME_MAX];
+        char detail[48];
+        gfx_color_t color = GFX_BLACK;
+        if (index >= count) {
+            break;
         }
+        entry = file_browser_entry(index);
+        if (entry == NULL) {
+            continue;
+        }
+        if (index == selection) {
+            gfx_fill_rounded_rect(fb, 20, y - 4, 440, row_height - 6, 8, GFX_BLACK);
+            color = GFX_WHITE;
+        }
+        file_browser_draw_icon(fb, 34, y + 12, entry->is_directory, color);
+        copy_short_text(name, sizeof(name), entry->name, 42);
+        font_draw_text_builtin(18, fb, 88, y + 9, name, color);
+        if (entry->is_directory) {
+            snprintf(detail, sizeof(detail), "目录");
+        } else if (entry->is_text) {
+            snprintf(detail, sizeof(detail), "TXT  %u bytes", (unsigned int)entry->size);
+        } else {
+            snprintf(detail, sizeof(detail), "不支持  %u bytes", (unsigned int)entry->size);
+        }
+        font_draw_text_builtin(14, fb, 88, y + 41, detail, color);
+    }
+
+    gfx_fill_rect(fb, 0, 752, GFX_WIDTH, 1, GFX_BLACK);
+    if (app->file_browser_error == 2) {
+        font_draw_text_aligned_builtin(14, fb, 12, 768, 456,
+                                       "当前只支持打开 TXT 文件", FONT_ALIGN_CENTER, GFX_BLACK);
+    } else {
+        font_draw_text_aligned_builtin(14, fb, 12, 768, 456,
+                                       "HOME 打开   BACK 返回", FONT_ALIGN_CENTER, GFX_BLACK);
+    }
+}
+
+static bookshelf_display_book_t bookshelf_book_for_index(int index) {
+    bookshelf_display_book_t display = {{0}, {0}, "TXT", BOOKSHELF_COVER_FILE};
+    const reader_book_t *book = reader_library_book(index);
+    if (book != NULL) {
+        copy_short_text(display.title, sizeof(display.title), book->title, 24);
+        copy_short_text(display.author, sizeof(display.author), book->author, 18);
+        copy_short_text(display.file_type, sizeof(display.file_type), book->file_type, 8);
     }
     return display;
 }
@@ -430,7 +525,7 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
     const int start_y = 58;
     const int step_x = 156;
     const int step_y = 222;
-    const int display_count = (int)(sizeof(bookshelf_books) / sizeof(bookshelf_books[0]));
+    const int display_count = reader_library_book_count();
     (void)font;
 
     bookshelf_status_bar(fb);
@@ -442,7 +537,7 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
         int cover_y = start_y + row * step_y;
         int cover_h = row == 2 ? 158 : 170;
         bookshelf_display_book_t book = bookshelf_book_for_index(i);
-        int selected = i < APP_BOOK_COUNT && app->bookshelf_selection == i;
+        int selected = app->bookshelf_selection == i;
         int title_size = i == 6 ? 16 : 18;
         int author_size = (i == 5 || row == 2) ? 12 : 14;
         int title_y = cover_y + cover_h + (row == 2 ? 7 : 10);
@@ -461,10 +556,19 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
                                        book.author, FONT_ALIGN_CENTER, GFX_BLACK);
     }
 
+    if (display_count == 0) {
+        font_draw_text_aligned_builtin(20, fb, 24, 360, 432,
+                                       "未发现 SD 卡 TXT 书籍", FONT_ALIGN_CENTER, GFX_BLACK);
+        font_draw_text_aligned_builtin(14, fb, 24, 400, 432,
+                                       "请放入 /books 后重启设备", FONT_ALIGN_CENTER, GFX_BLACK);
+    }
     gfx_fill_rect(fb, 0, 768, GFX_WIDTH, 1, GFX_BLACK);
-    font_draw_text_builtin(14, fb, 18, 779, "共 12 本书", GFX_BLACK);
-    font_draw_text_aligned_builtin(20, fb, 190, 777, 100, "1 / 2", FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_builtin(14, fb, 372, 779, "按最近阅读", GFX_BLACK);
+    {
+        char count_text[32];
+        snprintf(count_text, sizeof(count_text), "SD 书籍：%d 本", display_count);
+        font_draw_text_builtin(14, fb, 18, 779, count_text, GFX_BLACK);
+    }
+    font_draw_text_aligned_builtin(14, fb, 308, 779, 144, "仅显示 SD TXT", FONT_ALIGN_RIGHT, GFX_BLACK);
     settings_draw_line(fb, 450, 784, 456, 790, 1, GFX_BLACK);
     settings_draw_line(fb, 456, 790, 462, 784, 1, GFX_BLACK);
 }
@@ -691,7 +795,7 @@ static void render_reader_catalog(gfx_framebuffer_t *fb, const app_state_t *app,
     for (int i = 0; i < chapter_count && i < 9; i++) {
         int row_y = 22 + i * 52;
         int page = reader_library_chapter_page(app->current_book, i) + 1;
-        char page_text[8];
+        char page_text[16];
         if (app->reader_catalog_selection == i) {
             gfx_draw_rounded_rect_thick(fb, 14, row_y + 4, 452, 44, 4, 1, GFX_BLACK);
             reader_catalog_draw_triangle(fb, 28, row_y + 20);
@@ -1055,7 +1159,7 @@ static void render_calendar(gfx_framebuffer_t *fb, const app_state_t *app, const
         int cell_month = month;
         int in_month = i >= first_weekday && i < first_weekday + month_days;
         int selected;
-        char day[4];
+        char day[12];
         if (in_month) {
             day_number = i - first_weekday + 1;
         } else if (i < first_weekday) {
@@ -1394,6 +1498,59 @@ static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const
     home_status_bar(fb, font);
 }
 
+static void render_wifi_setup(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
+    char password_mask[33];
+    char character[2];
+    int password_length = (int)strlen(app->wifi_password);
+    const char *rows[] = {"Wi-Fi 名称 (SSID)", "Wi-Fi 密码", "保存并重启校时"};
+    const char *values[] = {app->wifi_ssid[0] != '\0' ? app->wifi_ssid : "未设置",
+                            password_mask, "写入 NVS"};
+    const int row_top = 186;
+    const int row_height = 96;
+
+    (void)font;
+    if (password_length > 32) {
+        password_length = 32;
+    }
+    for (int i = 0; i < password_length; i++) {
+        password_mask[i] = '*';
+    }
+    password_mask[password_length] = '\0';
+    character[0] = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.@!#"[app->wifi_edit_char_index];
+    character[1] = '\0';
+
+    home_status_bar(fb, font);
+    font_draw_text_builtin(30, fb, 28, 72, "Wi-Fi 配置", GFX_BLACK);
+    font_draw_text_builtin(14, fb, 28, 105, "保存后设备会重启，并自动连接 Wi-Fi 校时", GFX_BLACK);
+
+    for (int i = 0; i < 3; i++) {
+        int y = row_top + i * row_height;
+        if (!app->wifi_editor_active && app->wifi_setup_selection == i) {
+            gfx_fill_rounded_rect(fb, 20, y, 440, 76, 10, GFX_BLACK);
+            font_draw_text_builtin(20, fb, 40, y + 14, rows[i], GFX_WHITE);
+            font_draw_text_builtin(16, fb, 40, y + 44, values[i], GFX_WHITE);
+        } else {
+            gfx_draw_rounded_rect_thick(fb, 20, y, 440, 76, 10, 1, GFX_BLACK);
+            font_draw_text_builtin(20, fb, 40, y + 14, rows[i], GFX_BLACK);
+            font_draw_text_builtin(16, fb, 40, y + 44, values[i], GFX_BLACK);
+        }
+    }
+
+    if (app->wifi_editor_active) {
+        int y = row_top + app->wifi_setup_selection * row_height;
+        gfx_draw_rounded_rect_thick(fb, 16, y - 4, 448, 84, 12, 3, GFX_BLACK);
+        font_draw_text_builtin(20, fb, 28, 540, "正在编辑", GFX_BLACK);
+        font_draw_text_builtin(20, fb, 162, 540, "当前字符:", GFX_BLACK);
+        gfx_draw_rounded_rect_thick(fb, 320, 520, 72, 48, 8, 2, GFX_BLACK);
+        font_draw_text_aligned_builtin(24, fb, 320, 532, 72, character, FONT_ALIGN_CENTER, GFX_BLACK);
+        font_draw_text_aligned_builtin(16, fb, 24, 602, 432,
+                                       "UP/DOWN 选字符  HOME 添加  POWER 删除  BACK 完成", FONT_ALIGN_CENTER, GFX_BLACK);
+    } else {
+        font_draw_text_aligned_builtin(16, fb, 24, 602, 432,
+                                       "UP/DOWN 选择  HOME 编辑或保存  BACK 返回", FONT_ALIGN_CENTER, GFX_BLACK);
+    }
+}
+
 static void render_about(gfx_framebuffer_t *fb, const font_t *font) {
     const font_face_t *title = font_get_face(FONT_SIZE_24);
     const font_face_t *normal = font_get_face(FONT_SIZE_20);
@@ -1401,10 +1558,10 @@ static void render_about(gfx_framebuffer_t *fb, const font_t *font) {
     title_bar(fb, font, "关于", "");
     font_draw_text_aligned(title, fb, PAGE_MARGIN_X, BODY_TOP + 40, CONTENT_WIDTH, "ESP32 墨水屏阅读器", FONT_ALIGN_CENTER, GFX_BLACK);
     font_draw_text_aligned(normal, fb, PAGE_MARGIN_X, BODY_TOP + 160, CONTENT_WIDTH, "固件版本 SIM V0", FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_aligned(normal, fb, PAGE_MARGIN_X, BODY_TOP + 240, CONTENT_WIDTH, "芯片型号 ESP32 N16R8", FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned(normal, fb, PAGE_MARGIN_X, BODY_TOP + 240, CONTENT_WIDTH, "芯片型号 ESP32-S3 N16R8", FONT_ALIGN_CENTER, GFX_BLACK);
     font_draw_text_aligned(normal, fb, PAGE_MARGIN_X, BODY_TOP + 320, CONTENT_WIDTH, "Flash 16MB  PSRAM 8MB", FONT_ALIGN_CENTER, GFX_BLACK);
     font_draw_text_aligned(normal, fb, PAGE_MARGIN_X, BODY_TOP + 440, CONTENT_WIDTH, "4.26寸 480X800 黑白高刷", FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_aligned(small, fb, PAGE_MARGIN_X, BODY_TOP + 520, CONTENT_WIDTH, "SSD677 SPI", FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned(small, fb, PAGE_MARGIN_X, BODY_TOP + 520, CONTENT_WIDTH, "SSD1677 SPI", FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
@@ -1419,6 +1576,9 @@ void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t 
             break;
         case APP_PAGE_BOOKSHELF:
             render_bookshelf(fb, app, font);
+            break;
+        case APP_PAGE_FILE_BROWSER:
+            render_file_browser(fb, app, font);
             break;
         case APP_PAGE_READER:
             render_reader(fb, app, font);
@@ -1440,6 +1600,9 @@ void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t 
             break;
         case APP_PAGE_SETTINGS:
             render_settings(fb, app, font);
+            break;
+        case APP_PAGE_WIFI_SETUP:
+            render_wifi_setup(fb, app, font);
             break;
         case APP_PAGE_ABOUT:
         default:

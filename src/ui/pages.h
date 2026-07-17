@@ -6,5 +6,6 @@
 #include "gfx/gfx.h"
 
 void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font);
+int ui_home_tile_bounds(int index, int *x, int *y, int *width, int *height);
 
 #endif

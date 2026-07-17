@@ -2,12 +2,19 @@
 #define ESP_INPUT_H
 
 #include "app/app_state.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 #include "platform/input_debounce.h"
 
-#define ESP_INPUT_BUTTON_COUNT 4
+#define ESP_INPUT_BUTTON_COUNT 5
+#define ESP_INPUT_EVENT_QUEUE_LENGTH 8
 
 typedef struct {
     input_debounce_t debounce[ESP_INPUT_BUTTON_COUNT];
+    QueueHandle_t event_queue;
+    TaskHandle_t scan_task;
+    int scan_task_started;
 } esp_input_t;
 
 void esp_input_init(esp_input_t *input);

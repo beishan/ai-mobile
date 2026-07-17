@@ -76,6 +76,13 @@ static void icon_about(gfx_framebuffer_t *fb, int x, int y) {
     px(fb, x + 23, y + 48, 19, 4, GFX_BLACK);
 }
 
+static void icon_files(gfx_framebuffer_t *fb, int x, int y) {
+    gfx_draw_rect(fb, x + 5, y + 17, 54, 36, GFX_BLACK);
+    px(fb, x + 5, y + 12, 23, 6, GFX_BLACK);
+    px(fb, x + 9, y + 23, 46, 2, GFX_BLACK);
+    px(fb, x + 9, y + 43, 32, 2, GFX_BLACK);
+}
+
 void ui_draw_icon(gfx_framebuffer_t *fb, ui_icon_kind_t kind, int x, int y, int selected) {
     (void)selected; /* Selection border is now drawn by the caller */
 
@@ -117,6 +124,9 @@ void ui_draw_icon(gfx_framebuffer_t *fb, ui_icon_kind_t kind, int x, int y, int 
         case UI_ICON_SNOWY:
             /* These are handled by the bitmap fallback above */
             return;
+        case UI_ICON_FILES:
+            icon_files(fb, x, y);
+            break;
         default:
             icon_about(fb, x, y);
             break;

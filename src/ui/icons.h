@@ -14,7 +14,8 @@ typedef enum {
     UI_ICON_SUNNY,
     UI_ICON_CLOUDY,
     UI_ICON_RAINY,
-    UI_ICON_SNOWY
+    UI_ICON_SNOWY,
+    UI_ICON_FILES
 } ui_icon_kind_t;
 
 void ui_draw_icon(gfx_framebuffer_t *fb, ui_icon_kind_t kind, int x, int y, int selected);

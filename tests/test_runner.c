@@ -5,6 +5,7 @@
 
 #include "app/app_state.h"
 #include "app/app_persistence.h"
+#include "app/file_browser.h"
 #include "app/reader_library.h"
 #include "font/font.h"
 #include "gfx/gfx.h"
@@ -12,6 +13,7 @@
 #include "platform/input_debounce.h"
 #include "platform/sdl_display.h"
 #include "platform/sim_display.h"
+#include "platform/ssd1677.h"
 #include "ui/icons.h"
 #include "ui/pages.h"
 
@@ -98,7 +100,7 @@ static void local_now_for_test(struct tm *out) {
     ASSERT_TRUE(localtime_r(&now, out) != NULL);
 }
 
-static void test_framebuffer_has_ssd677_size(void) {
+static void test_framebuffer_has_ssd1677_size(void) {
     gfx_framebuffer_t fb;
     gfx_init(&fb);
     ASSERT_EQ_INT(480, gfx_width(&fb));
@@ -150,9 +152,10 @@ static void test_epd_frame_pack_is_single_bw_plane(void) {
 
     gfx_init(&fb);
     gfx_clear(&fb, GFX_WHITE);
-    gfx_set_pixel(&fb, 0, 0, GFX_BLACK);
-    gfx_set_pixel(&fb, 7, 0, GFX_BLACK);
-    gfx_set_pixel(&fb, 8, 0, GFX_BLACK);
+    /* Portrait pixels use the 180-degree SSD1677 native RAM mapping. */
+    gfx_set_pixel(&fb, 479, 0, GFX_BLACK);
+    gfx_set_pixel(&fb, 479, 7, GFX_BLACK);
+    gfx_set_pixel(&fb, 479, 8, GFX_BLACK);
 
     ASSERT_EQ_INT(0, epd_frame_pack(&fb, &frame));
     ASSERT_EQ_INT(48000, (int)sizeof(frame.bw));
@@ -160,36 +163,178 @@ static void test_epd_frame_pack_is_single_bw_plane(void) {
     ASSERT_EQ_INT(0x7f, frame.bw[1]);
 }
 
-static void test_target_documents_reference_ssd677_and_no_game_module(void) {
+#define SSD1677_TEST_MAX_EVENTS 64
+
+typedef struct {
+    char event_type[SSD1677_TEST_MAX_EVENTS];
+    uint8_t command[SSD1677_TEST_MAX_EVENTS];
+    size_t data_length[SSD1677_TEST_MAX_EVENTS];
+    uint8_t first_data[SSD1677_TEST_MAX_EVENTS];
+    int event_count;
+    int wait_count;
+    int delay_count;
+} ssd1677_test_io_t;
+
+static int ssd1677_test_command(void *context, uint8_t command) {
+    ssd1677_test_io_t *io = (ssd1677_test_io_t *)context;
+    ASSERT_TRUE(io->event_count < SSD1677_TEST_MAX_EVENTS);
+    io->event_type[io->event_count] = 'C';
+    io->command[io->event_count] = command;
+    io->event_count++;
+    return 0;
+}
+
+static int ssd1677_test_data(void *context, const uint8_t *data, size_t length) {
+    ssd1677_test_io_t *io = (ssd1677_test_io_t *)context;
+    ASSERT_TRUE(io->event_count < SSD1677_TEST_MAX_EVENTS);
+    io->event_type[io->event_count] = 'D';
+    io->data_length[io->event_count] = length;
+    io->first_data[io->event_count] = length > 0 ? data[0] : 0;
+    io->event_count++;
+    return 0;
+}
+
+static int ssd1677_test_wait(void *context, int timeout_ms) {
+    ssd1677_test_io_t *io = (ssd1677_test_io_t *)context;
+    ASSERT_TRUE(timeout_ms >= 10000);
+    io->wait_count++;
+    return 0;
+}
+
+static void ssd1677_test_delay(void *context, int delay_ms) {
+    ssd1677_test_io_t *io = (ssd1677_test_io_t *)context;
+    ASSERT_TRUE(delay_ms > 0);
+    io->delay_count++;
+}
+
+static int ssd1677_test_count_command(const ssd1677_test_io_t *io, uint8_t command) {
+    int count = 0;
+    for (int i = 0; i < io->event_count; i++) {
+        if (io->event_type[i] == 'C' && io->command[i] == command) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static int ssd1677_test_count_frame_writes(const ssd1677_test_io_t *io) {
+    int count = 0;
+    for (int i = 0; i < io->event_count; i++) {
+        if (io->event_type[i] == 'D' && io->data_length[i] == SSD1677_FRAME_BYTES) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static int ssd1677_test_count_data_byte(const ssd1677_test_io_t *io, uint8_t value) {
+    int count = 0;
+    for (int i = 0; i < io->event_count; i++) {
+        if (io->event_type[i] == 'D' && io->data_length[i] == 1 &&
+            io->first_data[i] == value) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static void test_ssd1677_full_refresh_and_sleep_sequence(void) {
+    ssd1677_test_io_t recorder = {0};
+    ssd1677_t controller;
+    uint8_t frame[SSD1677_FRAME_BYTES] = {0xff};
+    ssd1677_io_t io = {
+        .context = &recorder,
+        .write_command = ssd1677_test_command,
+        .write_data = ssd1677_test_data,
+        .wait_busy = ssd1677_test_wait,
+        .delay_ms = ssd1677_test_delay
+    };
+
+    ASSERT_EQ_INT(0, ssd1677_init(&controller, &io));
+    ASSERT_EQ_INT(1, controller.initialized);
+    ASSERT_EQ_INT(1, ssd1677_test_count_command(&recorder, 0x12));
+    ASSERT_EQ_INT(2, recorder.delay_count);
+
+    ASSERT_EQ_INT(0, ssd1677_present(&controller, frame, sizeof(frame)));
+    ASSERT_EQ_INT(1, ssd1677_test_count_command(&recorder, 0x26));
+    ASSERT_EQ_INT(1, ssd1677_test_count_command(&recorder, 0x24));
+    ASSERT_EQ_INT(2, ssd1677_test_count_frame_writes(&recorder));
+    ASSERT_EQ_INT(1, ssd1677_test_count_command(&recorder, 0x20));
+
+    ASSERT_EQ_INT(0, ssd1677_sleep(&controller));
+    ASSERT_EQ_INT(1, controller.sleeping);
+    ASSERT_EQ_INT(0, controller.initialized);
+    ASSERT_EQ_INT(1, ssd1677_test_count_command(&recorder, 0x10));
+    ASSERT_EQ_INT(2, ssd1677_test_count_command(&recorder, 0x20));
+    ASSERT_EQ_INT(3, recorder.wait_count);
+}
+
+static void test_ssd1677_partial_refresh_updates_only_window(void) {
+    ssd1677_test_io_t recorder = {0};
+    ssd1677_t controller;
+    uint8_t frame[SSD1677_FRAME_BYTES] = {0xff};
+    ssd1677_io_t io = {
+        .context = &recorder,
+        .write_command = ssd1677_test_command,
+        .write_data = ssd1677_test_data,
+        .wait_busy = ssd1677_test_wait,
+        .delay_ms = ssd1677_test_delay
+    };
+
+    ASSERT_EQ_INT(0, ssd1677_init(&controller, &io));
+    recorder.event_count = 0;
+    recorder.wait_count = 0;
+
+    ASSERT_EQ_INT(0, ssd1677_present_partial(&controller, frame, sizeof(frame),
+                                             16, 20, 16, 2));
+    ASSERT_EQ_INT(2, ssd1677_test_count_command(&recorder, 0x24));
+    ASSERT_EQ_INT(1, ssd1677_test_count_command(&recorder, 0x26));
+    ASSERT_EQ_INT(1, ssd1677_test_count_command(&recorder, 0x20));
+    ASSERT_EQ_INT(1, ssd1677_test_count_data_byte(&recorder, 0xfc));
+    ASSERT_EQ_INT(0, ssd1677_test_count_frame_writes(&recorder));
+    ASSERT_EQ_INT(1, recorder.wait_count);
+}
+
+static void test_target_documents_reference_ssd1677_and_no_game_module(void) {
     ASSERT_TRUE(file_contains("requires01.md", "4.26"));
     ASSERT_TRUE(file_contains("requires01.md", "480×800"));
-    ASSERT_TRUE(file_contains("requires01.md", "SSD677"));
+    ASSERT_TRUE(file_contains("requires01.md", "SSD1677"));
     ASSERT_TRUE(file_contains("requires01.md", "黑白显示规范"));
     ASSERT_TRUE(!file_contains("requires01.md", "游戏模块"));
     ASSERT_TRUE(!file_contains("requires01.md", "贪吃蛇"));
     ASSERT_TRUE(file_contains("README.md", "480"));
     ASSERT_TRUE(file_contains("README.md", "800"));
-    ASSERT_TRUE(file_contains("README.md", "SSD677"));
+    ASSERT_TRUE(file_contains("README.md", "SSD1677"));
 }
 
-static void test_esp_project_targets_ssd677_bw_panel(void) {
+static void test_esp_project_targets_ssd1677_bw_panel(void) {
     ASSERT_TRUE(file_contains("platformio.ini", "esp32-n16r8"));
-    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "SSD677"));
-    ASSERT_TRUE(file_contains("src/platform/esp_display.c", "SSD677"));
+    ASSERT_TRUE(file_contains("platformio.ini", "board = esp32-s3-devkitc-1"));
+    ASSERT_TRUE(file_contains("sdkconfig.defaults", "CONFIG_SPIRAM_MODE_OCT=y"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "SSD1677"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_EPD_PIN_BUSY 4"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_EPD_PIN_RST 16"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_EPD_PIN_DC 15"));
+    ASSERT_TRUE(file_contains("src/platform/ssd1677.c", "0x24"));
+    ASSERT_TRUE(file_contains("src/platform/ssd1677.c", "0x20"));
+    ASSERT_TRUE(file_contains("src/platform/ssd1677.c", "0x10"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "MALLOC_CAP_SPIRAM"));
+    ASSERT_TRUE(!file_contains("src/main_esp.c", "gfx_framebuffer_t fb;"));
     ASSERT_TRUE(file_contains("src/platform/epd_frame.h", "bw"));
     ASSERT_TRUE(!file_contains("src/platform/epd_frame.h", "red"));
 }
 
-static void test_home_has_six_modules_and_no_game(void) {
+static void test_home_has_file_browser_and_no_game(void) {
     app_page_t expected[] = {
         APP_PAGE_BOOKSHELF,
+        APP_PAGE_FILE_BROWSER,
         APP_PAGE_WEATHER,
         APP_PAGE_CALENDAR,
         APP_PAGE_ENGLISH,
         APP_PAGE_SETTINGS,
         APP_PAGE_ABOUT
     };
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         app_state_t app;
         app_init(&app);
         app.home_selection = i;
@@ -306,6 +451,7 @@ static void test_non_reader_pages_use_home_status_bar_style(void) {
     app_page_t pages[] = {
         APP_PAGE_HOME,
         APP_PAGE_BOOKSHELF,
+        APP_PAGE_FILE_BROWSER,
         APP_PAGE_READER,
         APP_PAGE_READER_CATALOG,
         APP_PAGE_READER_SETTINGS,
@@ -628,6 +774,36 @@ static void test_reader_library_loads_external_real_books(void) {
     ASSERT_EQ_INT(reader_library_page_count(2), app.book_pages[2]);
 }
 
+static void test_file_browser_lists_directories_and_opens_txt(void) {
+    app_state_t app;
+    int txt_index = -1;
+    ASSERT_TRUE(file_browser_open("assets/books") > 0);
+    ASSERT_TRUE(file_browser_entry(0) != NULL);
+    ASSERT_TRUE(file_browser_entry(0)->is_directory);
+
+    app_init(&app);
+    ASSERT_TRUE(file_browser_open("assets/books") > 0);
+    for (int i = 0; i < file_browser_count(); i++) {
+        const file_browser_entry_t *entry = file_browser_entry(i);
+        if (entry != NULL && entry->is_text) {
+            txt_index = i;
+            break;
+        }
+    }
+    ASSERT_TRUE(txt_index >= 0);
+    app.page = APP_PAGE_FILE_BROWSER;
+    app.file_browser_selection = txt_index;
+    app_handle_button(&app, APP_BUTTON_HOME);
+    ASSERT_EQ_INT(APP_PAGE_READER, app.page);
+    ASSERT_TRUE(reader_library_page_count(0) >= 1);
+}
+
+static void test_reader_library_loads_txt_directory(void) {
+    ASSERT_TRUE(reader_library_load_directory("assets/books/realbook") >= 2);
+    ASSERT_TRUE(reader_library_page_count(0) >= 1);
+    ASSERT_TRUE(reader_library_book(0)->file_type != NULL);
+}
+
 static void test_bookshelf_reflects_loaded_realbook_metadata(void) {
     gfx_framebuffer_t before_fb;
     gfx_framebuffer_t after_fb;
@@ -821,10 +997,17 @@ static void test_esp_firmware_wires_app_persistence_to_nvs(void) {
 }
 
 static void test_esp_input_wires_button_debounce(void) {
-    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BUTTON_DEBOUNCE_MS 60"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BUTTON_DEBOUNCE_MS 40"));
     ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BUTTON_LONG_PRESS_MS 1200"));
     ASSERT_TRUE(file_contains("src/platform/esp_input.c", "input_debounce_update"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "event=LONG_PRESS"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "PRESSED"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "RELEASED"));
     ASSERT_TRUE(file_contains("src/platform/esp_input.c", "APP_BUTTON_POWER_LONG"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "APP_BUTTON_BACK"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "xQueueSend"));
+    ASSERT_TRUE(file_contains("src/platform/esp_input.c", "xTaskCreate"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BUTTON_PIN_BACK 42"));
     ASSERT_TRUE(file_contains("src/main_esp.c", "esp_display_sleep"));
     ASSERT_TRUE(file_contains("src/CMakeLists.txt", "platform/input_debounce.c"));
 }
@@ -834,6 +1017,27 @@ static void test_sdl_key_mapping_for_core_buttons(void) {
     ASSERT_EQ_INT(APP_BUTTON_DOWN, sdl_display_button_from_key(SDLK_s));
     ASSERT_EQ_INT(APP_BUTTON_HOME, sdl_display_button_from_key(SDLK_RETURN));
     ASSERT_EQ_INT(APP_BUTTON_POWER, sdl_display_button_from_key(SDLK_BACKSPACE));
+    ASSERT_EQ_INT(APP_BUTTON_BACK, sdl_display_button_from_key(SDLK_ESCAPE));
+}
+
+static void test_back_button_returns_to_parent_page(void) {
+    app_state_t app;
+    app_init(&app);
+
+    app.page = APP_PAGE_READER;
+    app.reader_menu_open = 1;
+    app_handle_button(&app, APP_BUTTON_BACK);
+    ASSERT_EQ_INT(APP_PAGE_READER, app.page);
+    ASSERT_EQ_INT(0, app.reader_menu_open);
+
+    app_handle_button(&app, APP_BUTTON_BACK);
+    ASSERT_EQ_INT(APP_PAGE_BOOKSHELF, app.page);
+    app_handle_button(&app, APP_BUTTON_BACK);
+    ASSERT_EQ_INT(APP_PAGE_HOME, app.page);
+
+    app.page = APP_PAGE_READER_CATALOG;
+    app_handle_button(&app, APP_BUTTON_BACK);
+    ASSERT_EQ_INT(APP_PAGE_READER, app.page);
 }
 
 static void test_input_debounce_emits_once_after_stable_press(void) {
@@ -902,6 +1106,7 @@ static void test_primary_pages_render_nonblank(void) {
     app_page_t pages[] = {
         APP_PAGE_HOME,
         APP_PAGE_BOOKSHELF,
+        APP_PAGE_FILE_BROWSER,
         APP_PAGE_READER,
         APP_PAGE_READER_CATALOG,
         APP_PAGE_WEATHER,
@@ -1458,14 +1663,17 @@ static void test_reader_body_changes_when_external_font_choice_changes(void) {
 }
 
 int main(void) {
-    test_framebuffer_has_ssd677_size();
+    test_framebuffer_has_ssd1677_size();
     test_set_pixel_clips_out_of_bounds();
     test_rectangles_clip_and_place_black_pixels();
     test_display_commit_writes_480x800_ppm();
     test_epd_frame_pack_is_single_bw_plane();
-    test_target_documents_reference_ssd677_and_no_game_module();
-    test_esp_project_targets_ssd677_bw_panel();
-    test_home_has_six_modules_and_no_game();
+    test_ssd1677_full_refresh_and_sleep_sequence();
+    test_ssd1677_partial_refresh_updates_only_window();
+    test_target_documents_reference_ssd1677_and_no_game_module();
+    test_esp_project_targets_ssd1677_bw_panel();
+    test_home_has_file_browser_and_no_game();
+    test_file_browser_lists_directories_and_opens_txt();
     test_settings_page_scrolls_with_up_down_buttons();
     test_weather_page_scrolls_while_changing_city();
     test_home_selection_uses_outline_frame_and_larger_icon();
@@ -1488,6 +1696,7 @@ int main(void) {
     test_reader_library_auto_paginates_plain_text_file();
     test_bookshelf_reflects_loaded_realbook_metadata();
     test_reader_library_loads_external_real_books();
+    test_reader_library_loads_txt_directory();
     test_entrypoints_load_external_books_on_startup();
     test_app_persistence_round_trips_reader_progress_and_settings();
     test_app_persistence_clamps_restored_values_to_current_limits();
@@ -1498,6 +1707,7 @@ int main(void) {
     test_esp_firmware_wires_app_persistence_to_nvs();
     test_esp_input_wires_button_debounce();
     test_sdl_key_mapping_for_core_buttons();
+    test_back_button_returns_to_parent_page();
     test_input_debounce_emits_once_after_stable_press();
     test_input_debounce_rearms_after_stable_release();
     test_input_debounce_short_press_emits_on_release();

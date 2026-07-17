@@ -32,6 +32,10 @@ static int parse_button(const char *line, app_button_t *button) {
         *button = APP_BUTTON_POWER;
         return 1;
     }
+    if (line[0] == 'b') {
+        *button = APP_BUTTON_BACK;
+        return 1;
+    }
 
     return 0;
 }
@@ -59,6 +63,7 @@ int main(void) {
     (void)reader_library_load_external_books();
     app_init(&app);
     (void)app_persistence_load_app_file(APP_STATE_PATH, &app);
+    app_sync_reader_library(&app);
     gfx_init(&fb);
     if (!font_load_default(&font)) {
         fputs("failed to load default font\n", stderr);

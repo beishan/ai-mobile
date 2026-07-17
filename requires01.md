@@ -1,7 +1,7 @@
 # ESP32 黑白高刷墨水屏阅读器 - 产品需求规格说明
 
 **版本** v2.0  
-**平台** ESP32 N16R8 + PlatformIO (ESP-IDF) + 4.26 寸 480×800 黑白高刷 E-Ink + SSD677 + SPI  
+**平台** ESP32-S3 N16R8 + PlatformIO (ESP-IDF) + 4.26 寸 480×800 黑白高刷 E-Ink + SSD1677 + SPI
 **定位** 以阅读为核心的便携式黑白墨水屏设备。
 
 ## 1. 硬件规格
@@ -10,7 +10,7 @@
 
 | 项目 | 规格 |
 |------|------|
-| 型号 | ESP32 N16R8 |
+| 型号 | ESP32-S3 N16R8 |
 | Flash | 16MB |
 | PSRAM | 8MB |
 | 主频 | 240MHz |
@@ -25,35 +25,51 @@
 | 分辨率 | 480×800 px |
 | 显示 | 黑白 |
 | 刷新特性 | 高刷，优先支持阅读翻页和菜单切换 |
-| 驱动 IC | SSD677 |
+| 驱动 IC | SSD1677 |
 | 接口 | SPI |
 | 帧缓冲 | 单 1bpp 黑白平面，480×800/8 = 48,000 bytes |
 
 ## 2. 接线指南
 
-SSD677 E-Ink 屏使用 SPI 接口。当前代码中的唯一接线配置源为 `src/platform/esp_board_config.h`。
+SSD1677 E-Ink 屏使用 SPI 接口。当前代码中的唯一接线配置源为 `src/platform/esp_board_config.h`。
 
 | 屏幕引脚 | 功能 | ESP32 |
 |----------|------|-------|
 | VCC | 电源 | 3V |
 | GND | 地 | GND |
-| SDA/DIN | SPI MOSI | GPIO23 |
+| SDA/DIN | SPI MOSI | GPIO17 |
 | SCK/CLK | SPI 时钟 | GPIO18 |
 | CS | 片选 | GPIO5 |
-| DC | 数据/命令 | GPIO17 |
+| DC | 数据/命令 | GPIO15 |
 | RST | 复位 | GPIO16 |
 | BUSY | 忙信号 | GPIO4 |
 
-四个物理按键保持当前设计：
+SD 卡扩展板与墨水屏共享 SPI 的 MOSI 和时钟，各自使用独立片选：
+
+| SD 引脚 | ESP32-S3 | 说明 |
+|---------|-----------|------|
+| CS | GPIO13 | SD 独立片选 |
+| MOSI | GPIO17 | 与屏幕 SDA/MOSI 共用 |
+| CLK | GPIO18 | 与屏幕 SCK 共用 |
+| MISO | GPIO21 | 避开原生 USB GPIO19/20 |
+| VCC | 3V3 | 扩展板必须兼容 3.3V |
+| GND | GND | 与主控、屏幕共地 |
+
+固件将 FAT32 卡挂载到 `/sdcard`，并在启动时按文件名顺序加载
+`/sdcard/books` 中最多三个 UTF-8 `.txt` 文件。SD 卡不可用时应回退到内置书籍，
+不得阻塞显示初始化。
+
+五个物理按键保持当前设计：
 
 | Button | ESP32 pin |
 |--------|-----------|
-| POWER | GPIO0 |
-| UP | GPIO35 |
-| HOME | GPIO34 |
-| DOWN | GPIO39 |
+| BACK | GPIO42 |
+| POWER | GPIO41 |
+| UP | GPIO38 |
+| HOME | GPIO39 |
+| DOWN | GPIO40 |
 
-POWER 短按保持返回/退出行为；POWER 长按进入省电休眠路径。
+BACK 执行返回上一级；POWER 长按进入省电休眠路径，POWER 短按保留兼容操作。
 
 ## 3. 系统架构
 
@@ -63,20 +79,21 @@ POWER 短按保持返回/退出行为；POWER 长按进入省电休眠路径。
 - `src/font`: 点阵字体渲染。
 - `src/app`: 页面状态机、阅读进度、设置状态。
 - `src/ui`: 首页、阅读、天气、日历、英语、设置、关于页面渲染。
-- `src/platform`: SDL/PPM 仿真、ESP32 输入、SSD677 SPI 显示适配。
+- `src/platform`: SDL/PPM 仿真、ESP32 输入、SSD1677 SPI 显示适配、SDSPI/FAT 挂载。
 
 ## 4. 功能模块
 
 ### 4.1 首页
 
-首页固定为六个入口：
+首页包含七个入口：阅读、文件、天气、日历、英语、设置、关于。文件入口浏览
+`/sdcard`，支持进入/返回目录，并将选中的 UTF-8 `.txt` 文件交给阅读器打开。
 
 ```text
 阅读 / 天气 / 日历
 英语 / 设置 / 关于
 ```
 
-首页不包含游戏入口。UP/DOWN 移动选择，HOME 进入，POWER 从子页返回首页。
+首页不包含游戏入口。UP/DOWN 移动选择，HOME 进入，BACK 从子页返回上一级。
 
 ### 4.2 阅读模块
 
@@ -127,9 +144,9 @@ POWER 短按保持返回/退出行为；POWER 长按进入省电休眠路径。
 
 - 项目名称。
 - 固件/仿真版本。
-- ESP32 N16R8。
+- ESP32-S3 N16R8。
 - 4.26 寸 480×800 黑白高刷屏。
-- SSD677 SPI。
+- SSD1677 SPI。
 
 ## 5. 黑白显示规范
 
@@ -142,7 +159,7 @@ POWER 短按保持返回/退出行为；POWER 长按进入省电休眠路径。
 
 选中态使用反白、黑色短线、双线框或加粗图形表达。不得使用红色语义。
 
-## 6. 帧缓冲和 SSD677 适配
+## 6. 帧缓冲和 SSD1677 适配
 
 共享 framebuffer 尺寸必须为 480×800。
 
@@ -162,7 +179,7 @@ typedef struct {
 - 黑色像素对应 bit = 0。
 - 每字节从高位到低位对应从左到右的 8 个像素。
 
-SSD677 初始化、窗口设置、数据写入、刷新触发、休眠命令由 `src/platform/esp_display.c` 承接。当前阶段先完成 GPIO/SPI 初始化、frame packing、日志验证；后续接入供应商 datasheet 的具体命令表。
+SSD1677 初始化、窗口设置、数据写入、刷新触发、休眠命令由 `src/platform/ssd1677.c` 承接，并通过 `esp_display.c` 连接 ESP-IDF GPIO/SPI。页面切换使用 OTP 全刷波形；主页 UP/DOWN 切换应用时仅对旧、新选中框所在窗口执行差分局刷。
 
 ## 7. 仿真器要求
 
@@ -179,7 +196,8 @@ SSD677 初始化、窗口设置、数据写入、刷新触发、休眠命令由 
 | Up / w | UP |
 | Down / s | DOWN |
 | Enter / Space / h | HOME |
-| Esc / Backspace / p | POWER |
+| Esc / b | BACK |
+| Backspace / p | POWER |
 | q | Quit |
 
 SDL smoke 模式：
@@ -194,12 +212,12 @@ SDL_VIDEODRIVER=dummy ./reader_sim_sdl --smoke
 - 页面渲染不得依赖红色或三色屏行为。
 - 所有页面必须能在 480×800 framebuffer 上非空渲染。
 - 首页不得出现游戏入口。
-- 文档、测试、代码中的当前目标必须统一为 4.26 寸 480×800 黑白 SSD677 SPI。
+- 文档、测试、代码中的当前目标必须统一为 4.26 寸 480×800 黑白 SSD1677 SPI。
 
 ## 9. 后续开发
 
-- 接入 SSD677 真实初始化和刷新命令。
-- 增加真实文件读取、TXT 分页、GBK/UTF-8 检测。
+- 修复当前 EPD BUSY/接线问题后，在实物 GDEQ0426T82 兼容屏上验收 SSD1677 全刷、主页选中框局刷、方向、休眠和唤醒。
+- 真机验收 SD 共享总线、FAT32 挂载和 TXT 加载，并增加 GBK 检测。
 - 增加 SD/NVS 持久化阅读进度和书签。
 - 改进 480×800 竖屏布局密度。
 - 增加电量检测。

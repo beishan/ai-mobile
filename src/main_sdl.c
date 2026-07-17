@@ -32,6 +32,7 @@ int main(int argc, char **argv) {
     (void)reader_library_load_external_books();
     app_init(&app);
     (void)app_persistence_load_app_file(APP_STATE_PATH, &app);
+    app_sync_reader_library(&app);
     gfx_init(&fb);
     if (!font_load_default(&font)) {
         fputs("failed to load default font\n", stderr);
@@ -40,7 +41,7 @@ int main(int argc, char **argv) {
     /* Load external bin fonts from assets/fonts/external directory */
     font_manager_load_dir("assets/fonts/external");
 
-    if (!sdl_display_init(&display, "ESP32 480x800 BW SSD677 Reader", 1)) {
+    if (!sdl_display_init(&display, "ESP32-S3 480x800 BW SSD1677 Reader", 1)) {
         fputs("failed to initialize SDL2 display\n", stderr);
         font_free(&font);
         return 1;

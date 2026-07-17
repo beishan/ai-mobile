@@ -4,6 +4,7 @@
 typedef enum {
     APP_PAGE_HOME = 0,
     APP_PAGE_BOOKSHELF,
+    APP_PAGE_FILE_BROWSER,
     APP_PAGE_READER,
     APP_PAGE_READER_CATALOG,
     APP_PAGE_READER_SETTINGS,
@@ -11,6 +12,7 @@ typedef enum {
     APP_PAGE_CALENDAR,
     APP_PAGE_ENGLISH,
     APP_PAGE_SETTINGS,
+    APP_PAGE_WIFI_SETUP,
     APP_PAGE_ABOUT
 } app_page_t;
 
@@ -19,6 +21,7 @@ typedef enum {
     APP_BUTTON_UP,
     APP_BUTTON_HOME,
     APP_BUTTON_DOWN,
+    APP_BUTTON_BACK,
     APP_BUTTON_POWER_LONG
 } app_button_t;
 
@@ -29,6 +32,8 @@ typedef struct {
     app_page_t page;
     int home_selection;
     int bookshelf_selection;
+    int file_browser_selection;
+    int file_browser_error;
     int current_book;
     int recent_book;
     int book_pages[APP_BOOK_COUNT];
@@ -66,10 +71,18 @@ typedef struct {
     int font_size_index;
     int line_spacing_index;
     int wifi_connected;
+    int wifi_setup_selection;
+    int wifi_editor_active;
+    int wifi_edit_char_index;
+    int wifi_config_save_requested;
+    char wifi_ssid[33];
+    char wifi_password[65];
     int power_saving_enabled;
 } app_state_t;
 
 void app_init(app_state_t *app);
+/* Reconcile saved reading state with the books currently indexed from SD. */
+void app_sync_reader_library(app_state_t *app);
 void app_handle_button(app_state_t *app, app_button_t button);
 const char *app_page_name(app_page_t page);
 

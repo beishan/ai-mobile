@@ -4,21 +4,30 @@ idf_component_register(
         "gfx/gfx.c"
         "app/app_state.c"
         "app/app_persistence.c"
+        "app/file_browser.c"
         "app/reader_library.c"
         "ui/pages.c"
         "ui/icons.c"
         "font/font.c"
         "platform/epd_frame.c"
+        "platform/ssd1677.c"
         "platform/input_debounce.c"
         "platform/esp_display.c"
         "platform/esp_input.c"
+        "platform/esp_sd.c"
+        "platform/esp_time_sync.c"
     INCLUDE_DIRS
         "."
         "../assets"
     REQUIRES
         esp_driver_gpio
         esp_driver_spi
+        fatfs
         freertos
+        esp_event
+        esp_netif
+        esp_wifi
         log
+        lwip
         nvs_flash
 )
