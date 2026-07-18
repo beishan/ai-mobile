@@ -1,6 +1,8 @@
 #ifndef READER_LIBRARY_H
 #define READER_LIBRARY_H
 
+#include <stdint.h>
+
 typedef struct {
     const char *title;
     const char *author;
@@ -10,6 +12,8 @@ typedef struct {
 } reader_book_t;
 
 int reader_library_book_count(void);
+uint32_t reader_library_book_id(int book_index);
+const char *reader_library_book_path(int book_index);
 const reader_book_t *reader_library_book(int book_index);
 int reader_library_page_count(int book_index);
 const char *reader_library_source_text(int book_index);
@@ -17,6 +21,10 @@ int reader_library_load_book_file(int book_index, const char *path);
 int reader_library_open_book_file(int book_index, const char *path);
 int reader_library_load_directory(const char *directory);
 int reader_library_load_external_books(void);
+int reader_library_configure_layout(int font_size, int font_family, int content_width,
+                                    int content_height, int line_height,
+                                    int indent_enabled, int bold_enabled);
+int reader_library_is_truncated(int book_index);
 const char *reader_library_page_text(int book_index, int page_index);
 const char *reader_library_chapter_title(int book_index, int chapter_index);
 int reader_library_chapter_page(int book_index, int chapter_index);

@@ -89,6 +89,8 @@ void esp_display_init(esp_display_t *display) {
         return;
     }
     display->refresh_count = 0;
+    display->partial_refresh_count = 0;
+    display->partial_since_full = 0;
     display->hardware_ready = 0;
     display->spi = NULL;
     ESP_LOGI(TAG, "display adapter initialized for %s controller=%s framebuffer=%dx%d",
@@ -264,6 +266,7 @@ int esp_display_present(esp_display_t *display, const gfx_framebuffer_t *fb) {
     }
 
     display->refresh_count++;
+    display->partial_since_full = 0;
     ESP_LOGI(TAG, "present SSD1677 BW frame %d: bytes=%d black=%d bw_sum=%08x",
              display->refresh_count,
              EPD_FRAME_BYTES,
@@ -286,6 +289,15 @@ int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t 
     if (display == NULL || fb == NULL || width <= 0 || height <= 0) {
         return -1;
     }
+
+#if ESP_EPD_PARTIAL_REFRESH_LIMIT > 0
+    if (display->partial_since_full >= ESP_EPD_PARTIAL_REFRESH_LIMIT) {
+        ESP_LOGI(TAG,
+                 "partial refresh limit reached (%d); performing full refresh to clear ghosting",
+                 display->partial_since_full);
+        return esp_display_present(display, fb);
+    }
+#endif
 
     /* Clip the dirty rectangle in portrait UI coordinates. */
     x_end = x + width;
@@ -336,9 +348,13 @@ int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t 
     }
 
     display->refresh_count++;
+    display->partial_refresh_count++;
+    display->partial_since_full++;
     ESP_LOGI(TAG,
-             "partial frame %d: ui=(%d,%d %dx%d) native=(%d,%d %dx%d) bytes=%d",
-             display->refresh_count, x, y, ui_width, ui_height,
+             "partial frame %d (partial total=%d, since full=%d/%d): ui=(%d,%d %dx%d) native=(%d,%d %dx%d) bytes=%d",
+             display->refresh_count, display->partial_refresh_count,
+             display->partial_since_full, ESP_EPD_PARTIAL_REFRESH_LIMIT,
+             x, y, ui_width, ui_height,
              native_x, native_y, native_width, native_height,
              (native_width / 8) * native_height);
     return 0;

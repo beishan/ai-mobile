@@ -344,18 +344,21 @@ static void test_home_has_file_browser_and_no_game(void) {
     ASSERT_TRUE(strcmp("unknown", app_page_name((app_page_t)99)) == 0);
 }
 
-static void test_settings_page_scrolls_with_up_down_buttons(void) {
+static void test_settings_page_selects_items_with_up_down_buttons(void) {
     app_state_t app;
     app_init(&app);
     app.page = APP_PAGE_SETTINGS;
 
     ASSERT_EQ_INT(0, app.settings_scroll);
     app_handle_button(&app, APP_BUTTON_DOWN);
+    ASSERT_EQ_INT(1, app.settings_selection);
+    ASSERT_EQ_INT(0, app.settings_scroll);
+    app_handle_button(&app, APP_BUTTON_UP);
+    ASSERT_EQ_INT(0, app.settings_selection);
+    ASSERT_EQ_INT(0, app.settings_scroll);
+    app_handle_button(&app, APP_BUTTON_UP);
+    ASSERT_EQ_INT(8, app.settings_selection);
     ASSERT_TRUE(app.settings_scroll > 0);
-    app_handle_button(&app, APP_BUTTON_UP);
-    ASSERT_EQ_INT(0, app.settings_scroll);
-    app_handle_button(&app, APP_BUTTON_UP);
-    ASSERT_EQ_INT(0, app.settings_scroll);
 }
 
 static void test_weather_page_scrolls_while_changing_city(void) {
@@ -1674,7 +1677,7 @@ int main(void) {
     test_esp_project_targets_ssd1677_bw_panel();
     test_home_has_file_browser_and_no_game();
     test_file_browser_lists_directories_and_opens_txt();
-    test_settings_page_scrolls_with_up_down_buttons();
+    test_settings_page_selects_items_with_up_down_buttons();
     test_weather_page_scrolls_while_changing_city();
     test_home_selection_uses_outline_frame_and_larger_icon();
     test_home_icons_use_modern_line_style_without_large_solid_blocks();

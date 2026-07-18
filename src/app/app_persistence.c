@@ -1,7 +1,10 @@
 #include "app/app_persistence.h"
+#include "app/reader_library.h"
+#include "font/font.h"
 
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -13,7 +16,6 @@
 
 #define APP_PERSISTENCE_CITY_COUNT 3
 #define APP_PERSISTENCE_FONT_COUNT 5
-#define APP_PERSISTENCE_READER_FONT_COUNT 4
 #define APP_PERSISTENCE_LINE_SPACING_COUNT 4
 
 static int clamp_int(int value, int min, int max) {
@@ -24,17 +26,6 @@ static int clamp_int(int value, int min, int max) {
         return max;
     }
     return value;
-}
-
-static int clamp_book_index(int value) {
-    return clamp_int(value, 0, APP_BOOK_COUNT - 1);
-}
-
-static int clamp_recent_book(int value) {
-    if (value < 0) {
-        return -1;
-    }
-    return clamp_book_index(value);
 }
 
 static int clamp_page_index(int value, int total_pages) {
@@ -90,12 +81,19 @@ void app_persistence_capture(const app_state_t *app, app_persisted_state_t *snap
     snapshot->current_book = app->current_book;
     snapshot->recent_book = app->recent_book;
     for (int i = 0; i < APP_BOOK_COUNT; i++) {
+        snapshot->book_ids[i] = reader_library_book_id(i);
         snapshot->book_current_pages[i] = app->book_current_pages[i];
         snapshot->book_bookmark_pages[i] = app->book_bookmark_pages[i];
     }
     snapshot->reader_font_index = app->reader_font_index;
+    snapshot->system_font_index = app->system_font_index;
     snapshot->font_size_index = app->font_size_index;
     snapshot->line_spacing_index = app->line_spacing_index;
+    snapshot->reader_margin_index = app->reader_margin_index;
+    snapshot->reader_indent_enabled = app->reader_indent_enabled;
+    snapshot->reader_bold_enabled = app->reader_bold_enabled;
+    snapshot->reader_page_turn_mode = app->reader_page_turn_mode;
+    snapshot->reader_refresh_mode = app->reader_refresh_mode;
     snapshot->wifi_connected = app->wifi_connected;
     snapshot->weather_city_index = app->weather_city_index;
     snapshot->power_saving_enabled = app->power_saving_enabled;
@@ -106,20 +104,55 @@ int app_persistence_apply(app_state_t *app, const app_persisted_state_t *snapsho
         return -1;
     }
 
-    app->current_book = clamp_book_index(snapshot->current_book);
-    app->recent_book = clamp_recent_book(snapshot->recent_book);
-    for (int i = 0; i < APP_BOOK_COUNT; i++) {
-        app->book_current_pages[i] = clamp_page_index(snapshot->book_current_pages[i], app->book_pages[i]);
-        app->book_bookmark_pages[i] = clamp_bookmark_page(snapshot->book_bookmark_pages[i], app->book_pages[i]);
-    }
-    app->reader_page = app->book_current_pages[app->current_book];
-    app->bookshelf_selection = app->current_book;
-    app->reader_font_index = clamp_int(snapshot->reader_font_index, 0, APP_PERSISTENCE_READER_FONT_COUNT - 1);
+    app->reader_font_index = clamp_int(snapshot->reader_font_index, 0,
+                                       font_manager_family_count() - 1);
+    app->system_font_index = clamp_int(snapshot->system_font_index, 0,
+                                       font_manager_family_count() - 1);
+    font_manager_set_system_family(app->system_font_index);
     app->font_size_index = clamp_int(snapshot->font_size_index, 0, APP_PERSISTENCE_FONT_COUNT - 1);
     app->line_spacing_index = clamp_int(snapshot->line_spacing_index, 0, APP_PERSISTENCE_LINE_SPACING_COUNT - 1);
+    app->reader_margin_index = clamp_int(snapshot->reader_margin_index, 0, 3);
+    app->reader_indent_enabled = normalize_bool(snapshot->reader_indent_enabled);
+    app->reader_bold_enabled = normalize_bool(snapshot->reader_bold_enabled);
+    app->reader_page_turn_mode = clamp_int(snapshot->reader_page_turn_mode, 0, 2);
+    app->reader_refresh_mode = clamp_int(snapshot->reader_refresh_mode, 0, 2);
     app->wifi_connected = normalize_bool(snapshot->wifi_connected);
     app->weather_city_index = clamp_int(snapshot->weather_city_index, 0, APP_PERSISTENCE_CITY_COUNT - 1);
     app->power_saving_enabled = normalize_bool(snapshot->power_saving_enabled);
+    app_sync_reader_library(app);
+    for (int i = 0; i < APP_BOOK_COUNT; i++) {
+        int saved = -1;
+        uint32_t current_id = reader_library_book_id(i);
+        for (int j = 0; j < APP_BOOK_COUNT; j++) {
+            if (current_id != 0 && snapshot->book_ids[j] == current_id) {
+                saved = j;
+                break;
+            }
+        }
+        if (saved < 0 && snapshot->book_ids[0] == 0) saved = i;
+        app->book_current_pages[i] = saved >= 0
+            ? clamp_page_index(snapshot->book_current_pages[saved], app->book_pages[i]) : 0;
+        app->book_bookmark_pages[i] = saved >= 0
+            ? clamp_bookmark_page(snapshot->book_bookmark_pages[saved], app->book_pages[i]) : -1;
+    }
+    app->current_book = 0;
+    app->recent_book = -1;
+    if (snapshot->current_book >= 0 && snapshot->current_book < APP_BOOK_COUNT) {
+        uint32_t wanted = snapshot->book_ids[snapshot->current_book];
+        for (int i = 0; i < reader_library_book_count(); i++) {
+            if ((wanted != 0 && reader_library_book_id(i) == wanted) ||
+                (wanted == 0 && i == snapshot->current_book)) app->current_book = i;
+        }
+    }
+    if (snapshot->recent_book >= 0 && snapshot->recent_book < APP_BOOK_COUNT) {
+        uint32_t wanted = snapshot->book_ids[snapshot->recent_book];
+        for (int i = 0; i < reader_library_book_count(); i++) {
+            if ((wanted != 0 && reader_library_book_id(i) == wanted) ||
+                (wanted == 0 && i == snapshot->recent_book)) app->recent_book = i;
+        }
+    }
+    app->reader_page = app->book_current_pages[app->current_book];
+    app->bookshelf_selection = app->current_book;
     return 0;
 }
 
@@ -134,17 +167,25 @@ int app_persistence_encode(const app_persisted_state_t *snapshot, char *buffer, 
                        "AIPERSIST %d\n"
                        "current=%d\n"
                        "recent=%d\n"
+                       "ids=%08" PRIx32 ",%08" PRIx32 ",%08" PRIx32 "\n"
                        "pages=%d,%d,%d\n"
                        "bookmarks=%d,%d,%d\n"
                        "reader_font=%d\n"
                        "font=%d\n"
                        "spacing=%d\n"
+                       "margin=%d\n"
+                       "indent=%d\n"
+                       "bold=%d\n"
+                       "turn=%d\n"
+                       "refresh=%d\n"
                        "wifi=%d\n"
                        "city=%d\n"
-                       "power=%d\n",
+                       "power=%d\n"
+                       "system_font=%d\n",
                        snapshot->version,
                        snapshot->current_book,
                        snapshot->recent_book,
+                       snapshot->book_ids[0], snapshot->book_ids[1], snapshot->book_ids[2],
                        snapshot->book_current_pages[0],
                        snapshot->book_current_pages[1],
                        snapshot->book_current_pages[2],
@@ -154,9 +195,15 @@ int app_persistence_encode(const app_persisted_state_t *snapshot, char *buffer, 
                        snapshot->reader_font_index,
                        snapshot->font_size_index,
                        snapshot->line_spacing_index,
+                       snapshot->reader_margin_index,
+                       snapshot->reader_indent_enabled,
+                       snapshot->reader_bold_enabled,
+                       snapshot->reader_page_turn_mode,
+                       snapshot->reader_refresh_mode,
                        snapshot->wifi_connected,
                        snapshot->weather_city_index,
-                       snapshot->power_saving_enabled);
+                       snapshot->power_saving_enabled,
+                       snapshot->system_font_index);
     if (written < 0 || (size_t)written >= buffer_size) {
         if (buffer_size > 0) {
             buffer[0] = '\0';
@@ -173,6 +220,41 @@ int app_persistence_decode(const char *buffer, app_persisted_state_t *snapshot) 
     if (buffer == NULL || snapshot == NULL) {
         return -1;
     }
+
+    memset(&parsed, 0, sizeof(parsed));
+    matched = sscanf(buffer,
+                     "AIPERSIST %d\n"
+                     "current=%d\n"
+                     "recent=%d\n"
+                     "ids=%" SCNx32 ",%" SCNx32 ",%" SCNx32 "\n"
+                     "pages=%d,%d,%d\n"
+                     "bookmarks=%d,%d,%d\n"
+                     "reader_font=%d\n"
+                     "font=%d\n"
+                     "spacing=%d\n"
+                     "margin=%d\n"
+                     "indent=%d\n"
+                     "bold=%d\n"
+                     "turn=%d\n"
+                     "refresh=%d\n"
+                     "wifi=%d\n"
+                     "city=%d\n"
+                     "power=%d\n%n",
+                     &parsed.version,
+                     &parsed.current_book,
+                     &parsed.recent_book,
+                     &parsed.book_ids[0], &parsed.book_ids[1], &parsed.book_ids[2],
+                     &parsed.book_current_pages[0], &parsed.book_current_pages[1],
+                     &parsed.book_current_pages[2],
+                     &parsed.book_bookmark_pages[0], &parsed.book_bookmark_pages[1],
+                     &parsed.book_bookmark_pages[2],
+                     &parsed.reader_font_index, &parsed.font_size_index,
+                     &parsed.line_spacing_index, &parsed.reader_margin_index,
+                     &parsed.reader_indent_enabled, &parsed.reader_bold_enabled,
+                     &parsed.reader_page_turn_mode, &parsed.reader_refresh_mode,
+                     &parsed.wifi_connected, &parsed.weather_city_index,
+                     &parsed.power_saving_enabled, &consumed);
+    if (matched == 23) goto parsed_ok;
 
     memset(&parsed, 0, sizeof(parsed));
     matched = sscanf(buffer,
@@ -236,7 +318,20 @@ int app_persistence_decode(const char *buffer, app_persisted_state_t *snapshot) 
             return -1;
         }
     }
-    if (parsed.version != APP_PERSISTENCE_VERSION) {
+parsed_ok:
+    {
+        int extra = 0;
+        int system_font = 0;
+        if (sscanf(buffer + consumed, "system_font=%d\n%n", &system_font, &extra) == 1) {
+            parsed.system_font_index = system_font;
+            consumed += extra;
+        }
+    }
+    if (parsed.version == 1) {
+        parsed.reader_margin_index = 1;
+        parsed.reader_indent_enabled = 1;
+        parsed.version = APP_PERSISTENCE_VERSION;
+    } else if (parsed.version != APP_PERSISTENCE_VERSION) {
         return -1;
     }
     while (buffer[consumed] != '\0') {

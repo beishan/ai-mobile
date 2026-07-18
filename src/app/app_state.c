@@ -1,21 +1,21 @@
 #include "app/app_state.h"
 #include "app/file_browser.h"
 #include "app/reader_library.h"
+#include "font/font.h"
+#include "gfx/gfx.h"
 
 #include <stddef.h>
 #include <string.h>
 
 #define HOME_ITEM_COUNT 7
 #define READER_MENU_COUNT 5
-#define READER_SETTINGS_COUNT 10
-#define READER_FONT_COUNT 4
+#define READER_SETTINGS_COUNT 9
 #define WEATHER_CITY_COUNT 3
 #define WEATHER_SCROLL_STEP 120
 #define WEATHER_SCROLL_MAX 190
 #define CALENDAR_DAYS_IN_MONTH 30
-#define SETTINGS_COUNT 6
-#define SETTINGS_SCROLL_STEP 120
-#define SETTINGS_SCROLL_MAX 220
+#define SETTINGS_COUNT 10
+#define SETTINGS_SCROLL_MAX 276
 #define WIFI_SETUP_ROWS 3
 
 static const char wifi_edit_characters[] =
@@ -91,11 +91,31 @@ static void record_english_answer(app_state_t *app, int known) {
     app->english_show_back = 0;
 }
 
+static int configure_reader_layout(const app_state_t *app) {
+    static const int sizes[] = {16, 18, 20, 22, 24};
+    static const int spacing[] = {2, 5, 8, 14};
+    static const int margins[] = {20, 28, 36, 48};
+    int size_index = app->font_size_index;
+    int spacing_index = app->line_spacing_index;
+    int margin_index = app->reader_margin_index;
+    const font_face_t *face;
+    if (size_index < 0 || size_index >= 5) size_index = 2;
+    if (spacing_index < 0 || spacing_index >= 4) spacing_index = 2;
+    if (margin_index < 0 || margin_index >= 4) margin_index = 1;
+    face = font_get_face((font_size_t)sizes[size_index]);
+    return reader_library_configure_layout(sizes[size_index], app->reader_font_index,
+                                           GFX_WIDTH - margins[margin_index] * 2, 690,
+                                           face->size + spacing[spacing_index] + 12,
+                                           app->reader_indent_enabled,
+                                           app->reader_bold_enabled);
+}
+
 void app_sync_reader_library(app_state_t *app) {
     int book_count;
     if (app == NULL) {
         return;
     }
+    (void)configure_reader_layout(app);
     book_count = reader_library_book_count();
     for (int i = 0; i < APP_BOOK_COUNT; i++) {
         app->book_pages[i] = i < book_count ? reader_library_page_count(i) : 0;
@@ -141,7 +161,9 @@ void app_init(app_state_t *app) {
     app->reader_menu_selection = 0;
     app->reader_catalog_open = 0;
     app->reader_catalog_selection = 0;
-    app->reader_settings_selection = 9;
+    app->reader_settings_selection = 0;
+    app->reader_settings_editing = 0;
+    app->reader_pending_font_size_index = 2;
     app->reader_margin_index = 1;
     app->reader_indent_enabled = 1;
     app->reader_bold_enabled = 0;
@@ -166,7 +188,14 @@ void app_init(app_state_t *app) {
     }
     app->settings_selection = 0;
     app->settings_scroll = 0;
+    app->bluetooth_enabled = 0;
+    app->dictionary_enabled = 1;
+    app->time_sync_requested = 0;
+    app->update_check_requested = 0;
     app->reader_font_index = 0;
+    app->reader_font_selection = 0;
+    app->system_font_index = 0;
+    app->system_font_selection = 0;
     app->font_size_index = 2;
     app->line_spacing_index = 2;
     app->wifi_connected = 0;
@@ -279,7 +308,9 @@ static void handle_reader(app_state_t *app, app_button_t button) {
                 app->reader_menu_open = 0;
                 app->reader_catalog_open = 0;
                 app->page = APP_PAGE_READER_SETTINGS;
-                app->reader_settings_selection = 9;
+                app->reader_settings_selection = 0;
+                app->reader_settings_editing = 0;
+                app->reader_pending_font_size_index = app->font_size_index;
             } else if (app->reader_menu_selection == 4) {
                 app->reader_menu_open = 0;
                 app->reader_catalog_open = 0;
@@ -331,7 +362,45 @@ static void reset_reader_settings(app_state_t *app) {
     app->reader_refresh_mode = 0;
 }
 
+static void apply_reader_layout_change(app_state_t *app, int old_page, int old_total) {
+    (void)configure_reader_layout(app);
+    for (int i = 0; i < APP_BOOK_COUNT; i++) {
+        app->book_pages[i] = reader_library_page_count(i);
+    }
+    if (old_total > 0 && app->book_pages[app->current_book] > 0) {
+        app->reader_page = old_page * app->book_pages[app->current_book] / old_total;
+    }
+    sync_reader_page(app);
+}
+
 static void handle_reader_settings(app_state_t *app, app_button_t button) {
+    int old_page = app->reader_page;
+    int old_total = app->book_pages[app->current_book];
+    int layout_changed = 0;
+
+    if (app->reader_settings_editing) {
+        if (button == APP_BUTTON_UP) {
+            if (app->reader_pending_font_size_index < 4) {
+                app->reader_pending_font_size_index++;
+            }
+        } else if (button == APP_BUTTON_DOWN) {
+            if (app->reader_pending_font_size_index > 0) {
+                app->reader_pending_font_size_index--;
+            }
+        } else if (button == APP_BUTTON_BACK) {
+            app->reader_settings_editing = 0;
+            if (app->font_size_index != app->reader_pending_font_size_index) {
+                app->font_size_index = app->reader_pending_font_size_index;
+                apply_reader_layout_change(app, old_page, old_total);
+            }
+        } else if (button == APP_BUTTON_POWER) {
+            app->reader_settings_editing = 0;
+            app->reader_pending_font_size_index = app->font_size_index;
+            app->page = APP_PAGE_READER;
+        }
+        return;
+    }
+
     if (button == APP_BUTTON_UP) {
         app->reader_settings_selection = wrap_index(app->reader_settings_selection - 1, READER_SETTINGS_COUNT);
     } else if (button == APP_BUTTON_DOWN) {
@@ -341,22 +410,28 @@ static void handle_reader_settings(app_state_t *app, app_button_t button) {
     } else if (button == APP_BUTTON_HOME) {
         switch (app->reader_settings_selection) {
             case 0:
-                app->font_size_index = wrap_index(app->font_size_index + 1, 5);
+                app->reader_pending_font_size_index = app->font_size_index;
+                app->reader_settings_editing = 1;
                 break;
             case 1:
-                app->reader_font_index = wrap_index(app->reader_font_index + 1, READER_FONT_COUNT);
+                app->reader_font_selection = app->reader_font_index;
+                app->page = APP_PAGE_READER_FONT;
                 break;
             case 2:
-                app->line_spacing_index = wrap_index(app->line_spacing_index + 1, 3);
+                app->line_spacing_index = wrap_index(app->line_spacing_index + 1, 4);
+                layout_changed = 1;
                 break;
             case 3:
                 app->reader_margin_index = wrap_index(app->reader_margin_index + 1, 4);
+                layout_changed = 1;
                 break;
             case 4:
                 app->reader_indent_enabled = !app->reader_indent_enabled;
+                layout_changed = 1;
                 break;
             case 5:
                 app->reader_bold_enabled = !app->reader_bold_enabled;
+                layout_changed = 1;
                 break;
             case 6:
                 app->reader_page_turn_mode = wrap_index(app->reader_page_turn_mode + 1, 3);
@@ -366,12 +441,14 @@ static void handle_reader_settings(app_state_t *app, app_button_t button) {
                 break;
             case 8:
                 reset_reader_settings(app);
-                app->reader_settings_selection = 9;
+                app->reader_settings_selection = 8;
+                layout_changed = 1;
                 break;
-            case 9:
             default:
-                app->page = APP_PAGE_READER;
                 break;
+        }
+        if (layout_changed) {
+            apply_reader_layout_change(app, old_page, old_total);
         }
     }
 }
@@ -444,20 +521,93 @@ static void handle_secondary_page(app_state_t *app, app_button_t button) {
             break;
         case APP_PAGE_SETTINGS:
             if (button == APP_BUTTON_UP) {
-                app->settings_scroll -= SETTINGS_SCROLL_STEP;
+                app->settings_selection = wrap_index(app->settings_selection - 1, SETTINGS_COUNT);
+            } else if (button == APP_BUTTON_DOWN) {
+                app->settings_selection = wrap_index(app->settings_selection + 1, SETTINGS_COUNT);
+            } else if (button == APP_BUTTON_HOME) {
+                switch (app->settings_selection) {
+                    case 0:
+                        app->page = APP_PAGE_WIFI_SETUP;
+                        app->wifi_setup_selection = 0;
+                        app->wifi_editor_active = 0;
+                        app->wifi_edit_char_index = 0;
+                        break;
+                    case 1:
+                        app->bluetooth_enabled = !app->bluetooth_enabled;
+                        break;
+                    case 2:
+                        app->weather_city_index = wrap_index(app->weather_city_index + 1, WEATHER_CITY_COUNT);
+                        break;
+                    case 3:
+                        /* NTP runs on boot after Wi-Fi setup; expose a user-visible request state. */
+                        app->time_sync_requested = 1;
+                        break;
+                    case 4:
+                        app->power_saving_enabled = !app->power_saving_enabled;
+                        break;
+                    case 5:
+                        app->file_browser_selection = 0;
+                        app->file_browser_error = file_browser_open("/sdcard") < 0;
+                        app->page = APP_PAGE_FILE_BROWSER;
+                        break;
+                    case 6:
+                        app->dictionary_enabled = !app->dictionary_enabled;
+                        break;
+                    case 7:
+                        app->page = APP_PAGE_ABOUT;
+                        break;
+                    case 8:
+                        app->update_check_requested = !app->update_check_requested;
+                        break;
+                    case 9:
+                        app->system_font_selection = app->system_font_index;
+                        app->page = APP_PAGE_SYSTEM_FONT;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            {
+                static const int row_y[SETTINGS_COUNT] = {184, 240, 364, 420, 544, 600, 724, 854, 910, 966};
+                int selected_y = row_y[app->settings_selection];
+                if (selected_y - app->settings_scroll > 690) {
+                    app->settings_scroll = selected_y - 690;
+                } else if (selected_y - app->settings_scroll < 150) {
+                    app->settings_scroll = selected_y - 150;
+                }
                 if (app->settings_scroll < 0) {
                     app->settings_scroll = 0;
-                }
-            } else if (button == APP_BUTTON_DOWN) {
-                app->settings_scroll += SETTINGS_SCROLL_STEP;
-                if (app->settings_scroll > SETTINGS_SCROLL_MAX) {
+                } else if (app->settings_scroll > SETTINGS_SCROLL_MAX) {
                     app->settings_scroll = SETTINGS_SCROLL_MAX;
                 }
+            }
+            break;
+        case APP_PAGE_SYSTEM_FONT:
+            if (button == APP_BUTTON_UP) {
+                app->system_font_selection = wrap_index(app->system_font_selection - 1,
+                                                        font_manager_family_count());
+            } else if (button == APP_BUTTON_DOWN) {
+                app->system_font_selection = wrap_index(app->system_font_selection + 1,
+                                                        font_manager_family_count());
             } else if (button == APP_BUTTON_HOME) {
-                app->page = APP_PAGE_WIFI_SETUP;
-                app->wifi_setup_selection = 0;
-                app->wifi_editor_active = 0;
-                app->wifi_edit_char_index = 0;
+                app->system_font_index = app->system_font_selection;
+                font_manager_set_system_family(app->system_font_index);
+                app->page = APP_PAGE_SETTINGS;
+            }
+            break;
+        case APP_PAGE_READER_FONT:
+            if (button == APP_BUTTON_UP) {
+                app->reader_font_selection = wrap_index(app->reader_font_selection - 1,
+                                                        font_manager_family_count());
+            } else if (button == APP_BUTTON_DOWN) {
+                app->reader_font_selection = wrap_index(app->reader_font_selection + 1,
+                                                        font_manager_family_count());
+            } else if (button == APP_BUTTON_HOME) {
+                int old_page = app->reader_page;
+                int old_total = app->book_pages[app->current_book];
+                app->reader_font_index = app->reader_font_selection;
+                apply_reader_layout_change(app, old_page, old_total);
+                app->page = APP_PAGE_READER_SETTINGS;
             }
             break;
         case APP_PAGE_WIFI_SETUP:
@@ -507,6 +657,10 @@ void app_handle_button(app_state_t *app, app_button_t button) {
     }
 
     if (button == APP_BUTTON_BACK) {
+        if (app->page == APP_PAGE_READER_SETTINGS && app->reader_settings_editing) {
+            handle_reader_settings(app, button);
+            return;
+        }
         switch (app->page) {
             case APP_PAGE_HOME:
                 return;
@@ -524,14 +678,18 @@ void app_handle_button(app_state_t *app, app_button_t button) {
             case APP_PAGE_READER_SETTINGS:
                 app->page = APP_PAGE_READER;
                 return;
+            case APP_PAGE_READER_FONT:
+                app->page = APP_PAGE_READER_SETTINGS;
+                return;
             case APP_PAGE_BOOKSHELF:
             case APP_PAGE_WEATHER:
             case APP_PAGE_CALENDAR:
             case APP_PAGE_ENGLISH:
             case APP_PAGE_SETTINGS:
+            case APP_PAGE_SYSTEM_FONT:
             case APP_PAGE_ABOUT:
             default:
-                app->page = APP_PAGE_HOME;
+                app->page = app->page == APP_PAGE_SYSTEM_FONT ? APP_PAGE_SETTINGS : APP_PAGE_HOME;
                 return;
             case APP_PAGE_WIFI_SETUP:
                 if (app->wifi_editor_active) {
@@ -587,6 +745,8 @@ const char *app_page_name(app_page_t page) {
             return "reader_catalog";
         case APP_PAGE_READER_SETTINGS:
             return "reader_settings";
+        case APP_PAGE_READER_FONT:
+            return "reader_font";
         case APP_PAGE_WEATHER:
             return "weather";
         case APP_PAGE_CALENDAR:
@@ -595,6 +755,8 @@ const char *app_page_name(app_page_t page) {
             return "english";
         case APP_PAGE_SETTINGS:
             return "settings";
+        case APP_PAGE_SYSTEM_FONT:
+            return "system_font";
         case APP_PAGE_WIFI_SETUP:
             return "wifi_setup";
         case APP_PAGE_ABOUT:

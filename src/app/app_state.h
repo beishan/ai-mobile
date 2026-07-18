@@ -8,10 +8,12 @@ typedef enum {
     APP_PAGE_READER,
     APP_PAGE_READER_CATALOG,
     APP_PAGE_READER_SETTINGS,
+    APP_PAGE_READER_FONT,
     APP_PAGE_WEATHER,
     APP_PAGE_CALENDAR,
     APP_PAGE_ENGLISH,
     APP_PAGE_SETTINGS,
+    APP_PAGE_SYSTEM_FONT,
     APP_PAGE_WIFI_SETUP,
     APP_PAGE_ABOUT
 } app_page_t;
@@ -45,6 +47,8 @@ typedef struct {
     int reader_catalog_open;
     int reader_catalog_selection;
     int reader_settings_selection;
+    int reader_settings_editing;
+    int reader_pending_font_size_index;
     int reader_margin_index;
     int reader_indent_enabled;
     int reader_bold_enabled;
@@ -67,7 +71,14 @@ typedef struct {
     int english_answer_state[APP_ENGLISH_WORD_COUNT];
     int settings_selection;
     int settings_scroll;
+    int bluetooth_enabled;
+    int dictionary_enabled;
+    int time_sync_requested;
+    int update_check_requested;
     int reader_font_index;
+    int reader_font_selection;
+    int system_font_index;
+    int system_font_selection;
     int font_size_index;
     int line_spacing_index;
     int wifi_connected;

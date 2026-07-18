@@ -84,5 +84,6 @@ while the other device is using the shared bus.
 - Long-press sleep powers the controller off and sends the SSD1677 deep-sleep command. The next presentation performs a hardware reset and reinitializes it.
 - On the home page, UP/DOWN redraws only the old and new selection-tile windows. Bookshelf selection and in-folder file-list navigation likewise refresh only the affected cards/rows; entering a folder reloads the list and therefore keeps a full refresh.
 - In the reader, UP/DOWN page turns redraw the text/progress area only; reader-menu changes, catalog selection, and in-place reader-setting edits also use their respective partial windows. Weather, calendar, English cards, settings, and Wi-Fi editing use bounded same-page partial windows. Entering a different page remains a full refresh.
+- The display driver automatically performs a full refresh after 12 consecutive successful partial refreshes to clean accumulated ghosting. The counter resets after every successful full refresh.
 - Before release, validate orientation, BUSY polarity, full refresh, home selection partial refresh, wake-after-sleep, and repeated refresh behavior on the exact GDEQ0426T82-compatible panel.
 - The SSD1677 behavior and BUSY polarity follow the successfully run `ping_test`; GPIOs were remapped to pins exposed by the ESP32-S3 N16R8 board.

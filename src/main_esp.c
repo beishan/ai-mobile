@@ -24,6 +24,25 @@ static const char *TAG = "ai_mobile";
 
 #define APP_NVS_NAMESPACE "reader"
 #define APP_NVS_KEY "app_state"
+#define SD_LIBRARY_TASK_STACK_SIZE 8192
+#define ESP_SD_FONT_DIRECTORY ESP_SD_MOUNT_POINT "/fonts"
+
+enum {
+    SD_LIBRARY_IDLE = 0,
+    SD_LIBRARY_LOADING,
+    SD_LIBRARY_COMPLETE,
+    SD_LIBRARY_READY
+};
+
+static volatile int sd_library_state = SD_LIBRARY_IDLE;
+static volatile int sd_library_loaded_count;
+
+static void sd_library_load_task(void *arg) {
+    (void)arg;
+    sd_library_loaded_count = reader_library_load_directory(ESP_SD_BOOK_DIRECTORY);
+    sd_library_state = SD_LIBRARY_COMPLETE;
+    vTaskDelete(NULL);
+}
 
 static void init_nvs_storage(void) {
     esp_err_t err = nvs_flash_init();
@@ -152,6 +171,34 @@ static int present_file_browser_selection_change(esp_display_t *display,
                                448, row_height + 10);
 }
 
+static int present_reader_page_animation(esp_display_t *display,
+                                         const gfx_framebuffer_t *fb,
+                                         int page_turn_mode) {
+    const int x = 20;
+    const int y = 60;
+    const int width = 440;
+    const int height = 740;
+    const int steps = 4;
+    if (page_turn_mode == 2) {
+        return esp_display_present_partial(display, fb, x, y, width, height);
+    }
+    for (int step = 0; step < steps; step++) {
+        int result;
+        if (page_turn_mode == 1) {
+            int band_y = y + step * height / steps;
+            int band_h = (step == steps - 1) ? y + height - band_y : height / steps;
+            result = esp_display_present_partial(display, fb, x, band_y, width, band_h);
+        } else {
+            int band_x = x + (steps - step - 1) * width / steps;
+            int band_right = x + (steps - step) * width / steps;
+            int band_w = band_right - band_x;
+            result = esp_display_present_partial(display, fb, band_x, y, band_w, height);
+        }
+        if (result != 0) return -1;
+    }
+    return 0;
+}
+
 static int present_reader_incremental_change(esp_display_t *display,
                                              const gfx_framebuffer_t *fb,
                                              app_page_t previous_page,
@@ -160,8 +207,16 @@ static int present_reader_incremental_change(esp_display_t *display,
                                              app_button_t button) {
     if (previous_page == APP_PAGE_READER && current->page == APP_PAGE_READER) {
         if (previous->reader_page != current->reader_page) {
-            /* Text and progress footer change; preserve the static status bar. */
-            return esp_display_present_partial(display, fb, 20, 60, 440, 740);
+            /* Normal mode favors clean full refreshes. Fast mode reveals the
+             * new page in bands; extreme mode uses one partial transaction. */
+            if (current->reader_refresh_mode == 0) {
+                return -1;
+            }
+            if (current->reader_refresh_mode == 2) {
+                return esp_display_present_partial(display, fb, 20, 60, 440, 740);
+            }
+            return present_reader_page_animation(display, fb,
+                                                 current->reader_page_turn_mode);
         }
         if (previous->reader_menu_open != current->reader_menu_open) {
             /* Opening/closing the centered reader menu only changes this overlay. */
@@ -180,8 +235,17 @@ static int present_reader_incremental_change(esp_display_t *display,
         const int row_x = 10;
         const int row_width = 460;
         const int row_height = 52;
-        int old_y = 22 + previous->reader_catalog_selection * 52;
-        int new_y = 22 + current->reader_catalog_selection * 52;
+        int old_start = previous->reader_catalog_selection >= 9
+                            ? previous->reader_catalog_selection - 8 : 0;
+        int new_start = current->reader_catalog_selection >= 9
+                            ? current->reader_catalog_selection - 8 : 0;
+        int old_y;
+        int new_y;
+        if (old_start != new_start) {
+            return esp_display_present_partial(display, fb, 10, 18, 460, 510);
+        }
+        old_y = 22 + (previous->reader_catalog_selection - old_start) * 52;
+        new_y = 22 + (current->reader_catalog_selection - new_start) * 52;
         if (esp_display_present_partial(display, fb, row_x, old_y, row_width, row_height) != 0 ||
             esp_display_present_partial(display, fb, row_x, new_y, row_width, row_height) != 0) {
             return -1;
@@ -191,6 +255,8 @@ static int present_reader_incremental_change(esp_display_t *display,
 
     if (previous_page == APP_PAGE_READER_SETTINGS && current->page == APP_PAGE_READER_SETTINGS &&
         (previous->reader_settings_selection != current->reader_settings_selection ||
+         previous->reader_settings_editing != current->reader_settings_editing ||
+         previous->reader_pending_font_size_index != current->reader_pending_font_size_index ||
          previous->font_size_index != current->font_size_index ||
          previous->reader_font_index != current->reader_font_index ||
          previous->line_spacing_index != current->line_spacing_index ||
@@ -244,7 +310,14 @@ static int present_reader_incremental_change(esp_display_t *display,
     }
 
     if (previous_page == APP_PAGE_SETTINGS && current->page == APP_PAGE_SETTINGS &&
-        previous->settings_scroll != current->settings_scroll) {
+        (previous->settings_selection != current->settings_selection ||
+         previous->settings_scroll != current->settings_scroll ||
+         previous->bluetooth_enabled != current->bluetooth_enabled ||
+         previous->dictionary_enabled != current->dictionary_enabled ||
+         previous->time_sync_requested != current->time_sync_requested ||
+         previous->update_check_requested != current->update_check_requested ||
+         previous->weather_city_index != current->weather_city_index ||
+         previous->power_saving_enabled != current->power_saving_enabled)) {
         return esp_display_present_partial(display, fb, 0, 40, GFX_WIDTH, GFX_HEIGHT - 40);
     }
 
@@ -272,6 +345,7 @@ void app_main(void) {
     esp_sd_t sd;
     font_t font;
     long long last_clock_minute;
+    int sd_mounted = 0;
 
     ESP_LOGI(TAG, "booting ESP32 E-Ink reader firmware");
 
@@ -287,9 +361,11 @@ void app_main(void) {
     init_nvs_storage();
     esp_time_sync_start();
     esp_time_sync_wait_for_time(ESP_NTP_BOOT_TIMEOUT_MS);
-    if (esp_sd_init(&sd) == 0) {
-        int loaded = reader_library_load_directory(ESP_SD_BOOK_DIRECTORY);
-        ESP_LOGI(TAG, "loaded %d TXT book(s) from %s", loaded, ESP_SD_BOOK_DIRECTORY);
+    sd_mounted = esp_sd_init(&sd) == 0;
+    if (sd_mounted) {
+        int font_count = font_manager_load_dir(ESP_SD_FONT_DIRECTORY);
+        ESP_LOGI(TAG, "cataloged %d external font file(s) from %s",
+                 font_count > 0 ? font_count : 0, ESP_SD_FONT_DIRECTORY);
     }
     app_init(&app);
     if (app_persistence_load_nvs(APP_NVS_NAMESPACE, APP_NVS_KEY, &app) == 0) {
@@ -313,8 +389,29 @@ void app_main(void) {
     }
     last_clock_minute = current_epoch_minute();
 
+    if (sd_mounted) {
+        sd_library_state = SD_LIBRARY_LOADING;
+        if (xTaskCreatePinnedToCore(sd_library_load_task, "book_index",
+                                    SD_LIBRARY_TASK_STACK_SIZE, NULL,
+                                    tskIDLE_PRIORITY + 1, NULL, 0) == pdPASS) {
+            ESP_LOGI(TAG, "desktop ready; indexing TXT books in background");
+        } else {
+            sd_library_state = SD_LIBRARY_IDLE;
+            ESP_LOGE(TAG, "failed to start background book indexing task");
+        }
+    }
+
     while (1) {
         app_button_t button;
+        if (sd_library_state == SD_LIBRARY_COMPLETE) {
+            sd_library_state = SD_LIBRARY_READY;
+            if (app_persistence_load_nvs(APP_NVS_NAMESPACE, APP_NVS_KEY, &app) == 0) {
+                ESP_LOGI(TAG, "restored reading progress after background indexing");
+            }
+            app_sync_reader_library(&app);
+            ESP_LOGI(TAG, "background indexing complete: loaded %d TXT book(s) from %s",
+                     sd_library_loaded_count, ESP_SD_BOOK_DIRECTORY);
+        }
         if (esp_input_poll_button(&input, &button)) {
             app_state_t previous_app = app;
             app_page_t previous_page = previous_app.page;
@@ -326,6 +423,12 @@ void app_main(void) {
                     ESP_LOGW(TAG, "failed to save app state before display sleep");
                 }
                 esp_display_sleep(&display);
+                continue;
+            }
+            if (sd_library_state == SD_LIBRARY_LOADING && app.page == APP_PAGE_HOME &&
+                button == APP_BUTTON_HOME &&
+                (app.home_selection == 0 || app.home_selection == 1)) {
+                ESP_LOGI(TAG, "book indexing is still running; bookshelf/files will be available shortly");
                 continue;
             }
             app_handle_button(&app, button);
@@ -341,6 +444,11 @@ void app_main(void) {
                     esp_restart();
                 }
                 ESP_LOGE(TAG, "failed to save Wi-Fi configuration");
+            }
+            if (app.time_sync_requested) {
+                ESP_LOGI(TAG, "time synchronization requested from Settings");
+                esp_time_sync_start();
+                app.wifi_connected = esp_time_sync_is_ready();
             }
             partial_home_selection = previous_page == APP_PAGE_HOME &&
                                      app.page == APP_PAGE_HOME &&

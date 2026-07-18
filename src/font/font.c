@@ -2,6 +2,19 @@
 
 #include <stddef.h>
 #include <string.h>
+
+static int suppress_system_font;
+
+static const external_font_t *system_font_for_size(int size) {
+    const external_font_t *font;
+    int diff;
+    if (suppress_system_font) return NULL;
+    font = font_manager_get_family(font_manager_system_family(), size);
+    if (font == NULL) return NULL;
+    diff = (font->nominal_size > 0 ? font->nominal_size : font->height) - size;
+    if (diff < 0) diff = -diff;
+    return diff <= 4 ? font : NULL;
+}
 #include <stdlib.h>
 #include <stdio.h>
 #include <dirent.h>
@@ -114,6 +127,8 @@ const font_glyph_t *font_find_glyph(const font_face_t *font, uint32_t codepoint)
 int font_measure_text(const font_face_t *font, const char *text) {
     const unsigned char *cursor = (const unsigned char *)text;
     int width = 0;
+    const external_font_t *system_font = system_font_for_size(font != NULL ? font->size : 16);
+    if (system_font != NULL) return external_font_measure_text(system_font, text);
     while (cursor != NULL && *cursor != '\0') {
         uint32_t cp;
         if (!font_decode_utf8(&cursor, &cp)) {
@@ -148,6 +163,11 @@ static void draw_glyph_bitmap(const font_face_t *font, gfx_framebuffer_t *fb, co
 void font_draw_text(const font_face_t *font, gfx_framebuffer_t *fb, int x, int y, const char *text, gfx_color_t color) {
     const unsigned char *cursor = (const unsigned char *)text;
     int draw_x = x;
+    const external_font_t *system_font = system_font_for_size(font != NULL ? font->size : 16);
+    if (system_font != NULL) {
+        external_font_draw_text(system_font, fb, x, y, text, color);
+        return;
+    }
     if (font == NULL || fb == NULL || text == NULL) {
         return;
     }
@@ -173,6 +193,11 @@ void font_draw_text(const font_face_t *font, gfx_framebuffer_t *fb, int x, int y
 }
 
 void font_draw_text_aligned(const font_face_t *font, gfx_framebuffer_t *fb, int x, int y, int width, const char *text, font_align_t align, gfx_color_t color) {
+    const external_font_t *system_font = system_font_for_size(font != NULL ? font->size : 16);
+    if (system_font != NULL) {
+        external_font_draw_text_aligned(system_font, fb, x, y, width, text, align, color);
+        return;
+    }
     int text_width = font_measure_text(font, text);
     int draw_x = x;
     if (align == FONT_ALIGN_CENTER) {
@@ -260,7 +285,47 @@ external_font_t *external_font_create(void) {
     return efont;
 }
 
-int external_font_load_file(external_font_t *efont, const char *filepath) {
+static void external_font_parse_filename(external_font_t *efont, const char *filepath) {
+    const char *filename = strrchr(filepath, '/');
+    const char *cursor;
+    const char *family;
+    char *end;
+    size_t family_len;
+    filename = filename != NULL ? filename + 1 : filepath;
+    snprintf(efont->name, sizeof(efont->name), "%s", filename);
+    snprintf(efont->path, sizeof(efont->path), "%s", filepath);
+    cursor = filename;
+    efont->nominal_size = (int)strtol(cursor, &end, 10);
+    if (end != cursor) cursor = end;
+    while (*cursor == ' ' || *cursor == '_' || *cursor == '-') cursor++;
+    {
+        int width = (int)strtol(cursor, &end, 10);
+        if (end != cursor) {
+            cursor = end;
+            if (*cursor == 'x' || *cursor == 'X') cursor++;
+            else if ((unsigned char)cursor[0] == 0xc3 &&
+                     (unsigned char)cursor[1] == 0x97) cursor += 2;
+            else width = 0;
+            if (width > 0) {
+                int height = (int)strtol(cursor, &end, 10);
+                if (end != cursor && height > 0) {
+                    efont->width = width;
+                    efont->height = height;
+                    cursor = end;
+                }
+            }
+        }
+    }
+    while (*cursor == ' ' || *cursor == '_' || *cursor == '-') cursor++;
+    family = *cursor != '\0' ? cursor : filename;
+    family_len = strlen(family);
+    if (family_len > 4 && strcmp(family + family_len - 4, ".bin") == 0) family_len -= 4;
+    if (family_len >= sizeof(efont->family)) family_len = sizeof(efont->family) - 1;
+    memcpy(efont->family, family, family_len);
+    efont->family[family_len] = '\0';
+}
+
+static int __attribute__((unused)) external_font_load_file_legacy(external_font_t *efont, const char *filepath) {
     FILE *file;
     long file_size;
     size_t read_size;
@@ -371,6 +436,46 @@ int external_font_load_file(external_font_t *efont, const char *filepath) {
     return 0;
 }
 
+int external_font_load_file(external_font_t *efont, const char *filepath) {
+#ifndef ESP_PLATFORM
+    int result = external_font_load_file_legacy(efont, filepath);
+    if (result == 0) external_font_parse_filename(efont, filepath);
+    return result;
+#else
+    FILE *file;
+    long file_size;
+    if (efont == NULL || filepath == NULL) return -1;
+    external_font_parse_filename(efont, filepath);
+    file = fopen(filepath, "rb");
+    if (file == NULL) return -1;
+    if (fseek(file, 0, SEEK_END) != 0 || (file_size = ftell(file)) <= 0) {
+        fclose(file);
+        return -1;
+    }
+    fclose(file);
+    if (efont->width <= 0 || efont->height <= 0) {
+        int bytes_per_glyph = (int)(file_size / 65536);
+        for (int width = 8; width <= 64 && efont->width == 0; width++) {
+            int bytes_per_row = (width + 7) / 8;
+            for (int height = 8; height <= 80; height++) {
+                if (bytes_per_row * height == bytes_per_glyph) {
+                    efont->width = width;
+                    efont->height = height;
+                    break;
+                }
+            }
+        }
+    }
+    if (efont->width <= 0 || efont->height <= 0) return -1;
+    efont->bytes_per_glyph = ((efont->width + 7) / 8) * efont->height;
+    efont->data_size = (int)file_size;
+    efont->loaded = 1;
+    printf("Cataloged external font: %s [%s] (%dx%d)\n",
+           efont->name, efont->family, efont->width, efont->height);
+    return 0;
+#endif
+}
+
 void external_font_free(external_font_t *efont) {
     if (efont != NULL) {
         if (efont->data != NULL) {
@@ -420,8 +525,9 @@ const font_glyph_t *external_font_find_glyph(const external_font_t *efont, uint3
 
 /* Render a single glyph from external font raw data directly.
  * This bypasses font_glyph_t to support fonts larger than FONT_MAX_BITMAP_BYTES. */
-static void draw_external_glyph_raw(const external_font_t *efont, gfx_framebuffer_t *fb,
-                                     uint32_t codepoint, int x, int y, gfx_color_t color) {
+static void draw_external_glyph_raw(const external_font_t *efont, FILE *stream,
+                                     gfx_framebuffer_t *fb, uint32_t codepoint,
+                                     int x, int y, gfx_color_t color) {
     int total_glyphs = efont->data_size / efont->bytes_per_glyph;
     /* ASCII characters use half-width (standard CJK font behavior) */
     int draw_w = (codepoint < 128) ? (efont->width + 1) / 2 : efont->width;
@@ -433,11 +539,21 @@ static void draw_external_glyph_raw(const external_font_t *efont, gfx_framebuffe
     
     int offset = (int)codepoint * efont->bytes_per_glyph;
     int bytes_per_row = (efont->width + 7) / 8;
+    unsigned char glyph[1024];
+    const unsigned char *bitmap = efont->data != NULL ? efont->data + offset : glyph;
+    if (efont->data == NULL &&
+        (stream == NULL || efont->bytes_per_glyph > (int)sizeof(glyph) ||
+         fseek(stream, offset, SEEK_SET) != 0 ||
+         fread(glyph, 1, (size_t)efont->bytes_per_glyph, stream) !=
+             (size_t)efont->bytes_per_glyph)) {
+        gfx_draw_rect(fb, x, y, draw_w, efont->height, color);
+        return;
+    }
     
     for (int row = 0; row < efont->height; row++) {
         for (int col = 0; col < draw_w; col++) {
             int byte_index = offset + row * bytes_per_row + col / 8;
-            uint8_t byte = efont->data[byte_index];
+            uint8_t byte = bitmap[byte_index - offset];
             if ((byte & (uint8_t)(1u << (7 - (col % 8)))) != 0) {
                 gfx_set_pixel(fb, x + col, y + row, color);
             }
@@ -467,11 +583,13 @@ int external_font_measure_text(const external_font_t *efont, const char *text) {
 void external_font_draw_text(const external_font_t *efont, gfx_framebuffer_t *fb, int x, int y, const char *text, gfx_color_t color) {
     const unsigned char *cursor = (const unsigned char *)text;
     int draw_x = x;
+    FILE *stream = NULL;
     
     if (efont == NULL || !efont->loaded || fb == NULL || text == NULL) {
         return;
     }
     
+    if (efont->data == NULL && (stream = fopen(efont->path, "rb")) == NULL) return;
     while (*cursor != '\0') {
         uint32_t cp;
         if (!font_decode_utf8(&cursor, &cp)) {
@@ -482,9 +600,10 @@ void external_font_draw_text(const external_font_t *efont, gfx_framebuffer_t *fb
             y += efont->height;
             continue;
         }
-        draw_external_glyph_raw(efont, fb, cp, draw_x, y, color);
+        draw_external_glyph_raw(efont, stream, fb, cp, draw_x, y, color);
         draw_x += (cp < 128) ? (efont->width + 1) / 2 : efont->width;
     }
+    if (stream != NULL) fclose(stream);
 }
 
 void external_font_draw_text_aligned(const external_font_t *efont, gfx_framebuffer_t *fb,
@@ -502,13 +621,15 @@ void external_font_draw_text_aligned(const external_font_t *efont, gfx_framebuff
 
 /* ====== Font Manager Implementation ====== */
 
-#define FONT_MGR_MAX_FONTS 16
+#define FONT_MGR_MAX_FONTS 64
 
 static struct {
     external_font_t *fonts[FONT_MGR_MAX_FONTS];
     int count;
     int initialized;
 } font_mgr = {0};
+
+static int system_family_index;
 
 static const font_face_t *font_builtin_face_for_size(int size) {
     if (size <= 13) {
@@ -570,7 +691,10 @@ int font_manager_load_dir(const char *dirpath) {
         
         /* Only process .bin files */
         const char *ext = strrchr(entry->d_name, '.');
-        if (ext == NULL || strcmp(ext, ".bin") != 0) {
+        if (ext == NULL || ext[0] != '.' ||
+            (ext[1] != 'b' && ext[1] != 'B') ||
+            (ext[2] != 'i' && ext[2] != 'I') ||
+            (ext[3] != 'n' && ext[3] != 'N') || ext[4] != '\0') {
             continue;
         }
         
@@ -588,6 +712,7 @@ int font_manager_load_dir(const char *dirpath) {
         }
         
         if (external_font_load_file(efont, filepath) != 0) {
+            printf("font_manager: rejected unsupported font %s\n", filepath);
             external_font_free(efont);
             continue;
         }
@@ -633,7 +758,8 @@ const external_font_t *font_manager_get(int size) {
     return NULL;
 }
 
-const external_font_t *font_manager_get_family(int family_index, int size) {
+#if 0
+static const external_font_t *font_manager_get_family_legacy(int family_index, int size) {
     const char *families[] = {"方正大黑", "汉仪正圆", "更纱黑体", "汉仪唐美人"};
     const char *family;
     const external_font_t *best = NULL;
@@ -668,6 +794,69 @@ const external_font_t *font_manager_get_family(int family_index, int size) {
     return best != NULL ? best : font_manager_get(size);
 }
 
+#endif
+
+int font_manager_family_count(void) {
+    int count = 1; /* Built-in font. */
+    for (int i = 0; i < font_mgr.count; i++) {
+        int seen = 0;
+        for (int j = 0; j < i; j++) {
+            if (strcmp(font_mgr.fonts[i]->family, font_mgr.fonts[j]->family) == 0) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen) count++;
+    }
+    return count;
+}
+
+const char *font_manager_family_name(int family_index) {
+    int ordinal = 1;
+    if (family_index <= 0) return "内置字体";
+    for (int i = 0; i < font_mgr.count; i++) {
+        int seen = 0;
+        for (int j = 0; j < i; j++) {
+            if (strcmp(font_mgr.fonts[i]->family, font_mgr.fonts[j]->family) == 0) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen && ordinal++ == family_index) return font_mgr.fonts[i]->family;
+    }
+    return "内置字体";
+}
+
+const external_font_t *font_manager_get_family(int family_index, int size) {
+    const char *family;
+    const external_font_t *best = NULL;
+    int best_diff = 0x7fffffff;
+    if (family_index <= 0 || family_index >= font_manager_family_count()) return NULL;
+    family = font_manager_family_name(family_index);
+    for (int i = 0; i < font_mgr.count; i++) {
+        int diff;
+        if (strcmp(font_mgr.fonts[i]->family, family) != 0) continue;
+        diff = font_mgr.fonts[i]->nominal_size > 0
+                   ? font_mgr.fonts[i]->nominal_size - size
+                   : font_mgr.fonts[i]->height - size;
+        if (diff < 0) diff = -diff;
+        if (diff < best_diff) {
+            best_diff = diff;
+            best = font_mgr.fonts[i];
+        }
+    }
+    return best;
+}
+
+void font_manager_set_system_family(int family_index) {
+    int count = font_manager_family_count();
+    system_family_index = family_index >= 0 && family_index < count ? family_index : 0;
+}
+
+int font_manager_system_family(void) {
+    return system_family_index;
+}
+
 int font_manager_has_external(int size) {
     return font_manager_get(size) != NULL ? 1 : 0;
 }
@@ -681,6 +870,7 @@ void font_manager_free_all(void) {
     }
     font_mgr.count = 0;
     font_mgr.initialized = 0;
+    system_family_index = 0;
 }
 
 /* Unified text drawing: uses external font if available, otherwise built-in */
@@ -711,6 +901,16 @@ int font_measure_text_auto(int size, const char *text) {
     }
 }
 
+int font_measure_text_family(int size, int family_index, const char *text) {
+    const external_font_t *efont = font_manager_get_family(family_index, size);
+    int width;
+    if (efont != NULL) return external_font_measure_text(efont, text);
+    suppress_system_font++;
+    width = font_measure_text_builtin(size, text);
+    suppress_system_font--;
+    return width;
+}
+
 static void font_draw_text_box_spaced_external(const external_font_t *efont, int size,
                                                gfx_framebuffer_t *fb, int x, int y, int width, int height,
                                                const char *text, int line_height, gfx_color_t color) {
@@ -718,12 +918,15 @@ static void font_draw_text_box_spaced_external(const external_font_t *efont, int
     int line_x = x;
     int line_y = y;
     int glyph_height;
+    FILE *stream = NULL;
 
     if (fb == NULL || text == NULL) {
         return;
     }
     if (efont == NULL) {
+        suppress_system_font++;
         font_draw_text_box_spaced(font_builtin_face_for_size(size), fb, x, y, width, height, text, line_height, color);
+        suppress_system_font--;
         return;
     }
 
@@ -731,12 +934,10 @@ static void font_draw_text_box_spaced_external(const external_font_t *efont, int
     if (line_height < glyph_height) {
         line_height = glyph_height;
     }
+    if (efont->data == NULL && (stream = fopen(efont->path, "rb")) == NULL) return;
     while (*cursor != '\0' && line_y + glyph_height <= y + height) {
-        const unsigned char *before = cursor;
         uint32_t cp;
         int advance;
-        char tmp[5] = {0};
-        int len;
 
         if (!font_decode_utf8(&cursor, &cp)) {
             break;
@@ -754,11 +955,10 @@ static void font_draw_text_box_spaced_external(const external_font_t *efont, int
         if (line_y + glyph_height > y + height) {
             break;
         }
-        len = (int)(cursor - before);
-        memcpy(tmp, before, (size_t)len);
-        external_font_draw_text(efont, fb, line_x, line_y, tmp, color);
+        draw_external_glyph_raw(efont, stream, fb, cp, line_x, line_y, color);
         line_x += advance;
     }
+    if (stream != NULL) fclose(stream);
 }
 
 void font_draw_text_box_spaced_auto(int size, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color) {

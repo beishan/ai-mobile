@@ -591,6 +591,30 @@ static int reader_line_height(const app_state_t *app, const font_face_t *body) {
     return body->size + extra[index];
 }
 
+static const char *reader_formatted_text(const char *source, int indent_enabled) {
+    static char formatted[8192];
+    size_t out = 0;
+    int paragraph_start = indent_enabled;
+    if (source == NULL) return "";
+    while (*source != '\0' && out + 8 < sizeof(formatted)) {
+        if (paragraph_start && *source != '\n' && *source != '\r') {
+            const char indent[] = "　　";
+            memcpy(formatted + out, indent, sizeof(indent) - 1);
+            out += sizeof(indent) - 1;
+            paragraph_start = 0;
+        }
+        if (*source == '\r') {
+            source++;
+            continue;
+        }
+        formatted[out++] = *source;
+        if (*source == '\n') paragraph_start = indent_enabled;
+        source++;
+    }
+    formatted[out] = '\0';
+    return formatted;
+}
+
 static void reader_settings_doc_icon(gfx_framebuffer_t *fb, int x, int y) {
     gfx_draw_rect(fb, x, y, 16, 20, GFX_BLACK);
     settings_draw_line(fb, x + 11, y, x + 16, y + 5, 1, GFX_BLACK);
@@ -606,7 +630,8 @@ static void reader_settings_divider(gfx_framebuffer_t *fb, int y) {
 
 static void reader_settings_selection(gfx_framebuffer_t *fb, const app_state_t *app, int index, int y, int h) {
     if (app->reader_settings_selection == index) {
-        gfx_draw_rect(fb, 27, y + 5, 426, h - 10, GFX_BLACK);
+        int thickness = index == 0 && app->reader_settings_editing ? 3 : 1;
+        gfx_draw_rounded_rect_thick(fb, 27, y + 5, 426, h - 10, 3, thickness, GFX_BLACK);
     }
 }
 
@@ -682,22 +707,28 @@ static void render_reader_settings(gfx_framebuffer_t *fb, const app_state_t *app
     const int panel_y = 90;
     const int panel_w = 434;
     const int panel_h = 626;
-    const char *font_labels[] = {"大黑", "正圆", "更纱", "唐美"};
     const char *refresh_labels[] = {"普通", "快速", "极速"};
-    const char *margin_labels[] = {"窄", "适中", "宽", "自定义"};
-    int font_value = app->font_size_index;
+    const char *spacing_labels[] = {"紧凑", "标准", "宽松", "超宽"};
+    const char *margin_labels[] = {"窄", "适中", "宽", "超宽"};
+    const int font_sizes[] = {16, 18, 20, 22, 24};
+    int font_value = app->reader_settings_editing
+                         ? app->reader_pending_font_size_index
+                         : app->font_size_index;
     int spacing_value = app->line_spacing_index;
     int margin = app->reader_margin_index;
+    char reader_font_name[40];
     (void)font;
     if (font_value < 0 || font_value > 4) {
         font_value = 2;
     }
-    if (spacing_value < 0 || spacing_value > 2) {
-        spacing_value = 1;
+    if (spacing_value < 0 || spacing_value > 3) {
+        spacing_value = 2;
     }
     if (margin < 0 || margin > 3) {
         margin = 1;
     }
+    copy_short_text(reader_font_name, sizeof(reader_font_name),
+                    font_manager_family_name(app->reader_font_index), 36);
 
     bookshelf_status_bar(fb);
     font_draw_text_aligned_builtin(28, fb, 0, 50, GFX_WIDTH, "阅读设置", FONT_ALIGN_CENTER, GFX_BLACK);
@@ -715,7 +746,7 @@ static void render_reader_settings(gfx_framebuffer_t *fb, const app_state_t *app
     {
         char size_text[8];
         int size_text_w;
-        snprintf(size_text, sizeof(size_text), "%d", 28 + font_value * 4);
+        snprintf(size_text, sizeof(size_text), "%d", font_sizes[font_value]);
         size_text_w = font_measure_text_builtin(20, size_text);
         font_draw_text_builtin(20, fb, 444 - size_text_w, 162, size_text, GFX_BLACK);
     }
@@ -723,15 +754,16 @@ static void render_reader_settings(gfx_framebuffer_t *fb, const app_state_t *app
 
     reader_settings_selection(fb, app, 1, 202, 66);
     font_draw_text_builtin(20, fb, 40, 231, "字体", GFX_BLACK);
-    reader_settings_segment(fb, 132, 222, 312, 30, font_labels, 4, app->reader_font_index);
+    gfx_draw_rounded_rect_thick(fb, 132, 222, 312, 30, 4, 1, GFX_BLACK);
+    font_draw_text_aligned_builtin(16, fb, 142, 229, 292,
+                                   reader_font_name,
+                                   FONT_ALIGN_CENTER, GFX_BLACK);
     reader_settings_divider(fb, 268);
 
     reader_settings_selection(fb, app, 2, 268, 70);
     font_draw_text_builtin(20, fb, 40, 296, "行距", GFX_BLACK);
-    reader_settings_slider(fb, 132, 305, 312, 3, spacing_value);
-    font_draw_text_builtin(14, fb, 132, 320, "紧凑", GFX_BLACK);
-    font_draw_text_aligned_builtin(14, fb, 292, 320, 56, "适中", FONT_ALIGN_CENTER, GFX_BLACK);
-    font_draw_text_builtin(14, fb, 404, 320, "宽松", GFX_BLACK);
+    reader_settings_segment(fb, 132, 292, 312, 30,
+                            spacing_labels, 4, spacing_value);
     reader_settings_divider(fb, 338);
 
     reader_settings_selection(fb, app, 3, 338, 124);
@@ -764,22 +796,14 @@ static void render_reader_settings(gfx_framebuffer_t *fb, const app_state_t *app
     reader_settings_segment(fb, 216, 672, 228, 30, refresh_labels, 3, app->reader_refresh_mode);
 
     if (app->reader_settings_selection == 8) {
-        gfx_draw_rect(fb, 30, 738, 198, 50, GFX_BLACK);
+        gfx_draw_rect(fb, 30, 738, 420, 50, GFX_BLACK);
     }
-    gfx_draw_rounded_rect_thick(fb, 32, 744, 194, 40, 4, 1, GFX_BLACK);
-    settings_draw_arc(fb, 88, 764, 10, 1, 0, 1, 1);
-    settings_draw_line(fb, 79, 760, 84, 755, 2, GFX_BLACK);
-    settings_draw_line(fb, 79, 760, 73, 758, 2, GFX_BLACK);
-    font_draw_text_aligned_builtin(20, fb, 92, 755, 110, "恢复默认", FONT_ALIGN_CENTER, GFX_BLACK);
-
-    if (app->reader_settings_selection == 9) {
-        gfx_draw_rect(fb, 252, 738, 198, 50, GFX_BLACK);
-    }
-    gfx_fill_rounded_rect(fb, 254, 744, 194, 40, 4, GFX_BLACK);
-    settings_draw_circle(fb, 328, 764, 10, 1, GFX_WHITE);
-    settings_draw_line(fb, 322, 763, 327, 768, 2, GFX_WHITE);
-    settings_draw_line(fb, 327, 768, 335, 758, 2, GFX_WHITE);
-    font_draw_text_aligned_builtin(20, fb, 342, 755, 70, "应用", FONT_ALIGN_CENTER, GFX_WHITE);
+    gfx_draw_rounded_rect_thick(fb, 32, 744, 416, 40, 4, 1, GFX_BLACK);
+    settings_draw_arc(fb, 168, 764, 10, 1, 0, 1, 1);
+    settings_draw_line(fb, 159, 760, 164, 755, 2, GFX_BLACK);
+    settings_draw_line(fb, 159, 760, 153, 758, 2, GFX_BLACK);
+    font_draw_text_aligned_builtin(20, fb, 190, 755, 130,
+                                   "恢复默认", FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 static void reader_catalog_draw_triangle(gfx_framebuffer_t *fb, int x, int y) {
@@ -791,9 +815,11 @@ static void reader_catalog_draw_triangle(gfx_framebuffer_t *fb, int x, int y) {
 
 static void render_reader_catalog(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
     int chapter_count = reader_library_chapter_count(app->current_book);
+    int start = app->reader_catalog_selection >= 9 ? app->reader_catalog_selection - 8 : 0;
 
-    for (int i = 0; i < chapter_count && i < 9; i++) {
-        int row_y = 22 + i * 52;
+    for (int row = 0; row < 9 && start + row < chapter_count; row++) {
+        int i = start + row;
+        int row_y = 22 + row * 52;
         int page = reader_library_chapter_page(app->current_book, i) + 1;
         char page_text[16];
         if (app->reader_catalog_selection == i) {
@@ -806,6 +832,13 @@ static void render_reader_catalog(gfx_framebuffer_t *fb, const app_state_t *app,
         font_draw_text_builtin(20, fb, app->reader_catalog_selection == i ? 48 : 40, row_y + 17,
                                reader_library_chapter_title(app->current_book, i), GFX_BLACK);
         font_draw_text_aligned_builtin(20, fb, 386, row_y + 17, 60, page_text, FONT_ALIGN_RIGHT, GFX_BLACK);
+    }
+    if (chapter_count > 9) {
+        char position[32];
+        snprintf(position, sizeof(position), "%d / %d",
+                 app->reader_catalog_selection + 1, chapter_count);
+        font_draw_text_aligned_builtin(14, fb, 344, 506, 112,
+                                       position, FONT_ALIGN_RIGHT, GFX_BLACK);
     }
     home_status_bar(fb, font);
 }
@@ -842,6 +875,7 @@ static void draw_weather_big_number(gfx_framebuffer_t *fb, int x, int y, const c
 }
 
 static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
+    static const int margins[] = {20, 28, 36, 48};
     char chapter_progress[64];
     char percent_text[8];
     int total_pages = app->book_pages[app->current_book];
@@ -849,14 +883,29 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
     int percent = total_pages > 0 ? current_page * 100 / total_pages : 0;
     const font_face_t *body_font = reader_body_font(app);
     int line_height = reader_line_height(app, body_font) + 12;
+    int margin_index = app->reader_margin_index;
+    int margin;
+    const char *body_text;
     (void)font;
+
+    if (margin_index < 0 || margin_index > 3) margin_index = 1;
+    margin = margins[margin_index];
+    body_text = reader_formatted_text(
+        reader_library_page_text(app->current_book, app->reader_page),
+        app->reader_indent_enabled);
 
     settings_status_bar(fb);
 
-    font_draw_text_box_spaced_family(body_font->size, app->reader_font_index, fb, 28, 70, 424, 690,
-                                     reader_library_page_text(app->current_book, app->reader_page),
+    font_draw_text_box_spaced_family(body_font->size, app->reader_font_index, fb,
+                                     margin, 70, GFX_WIDTH - margin * 2, 690,
+                                     body_text,
                                      line_height,
                                      GFX_BLACK);
+    if (app->reader_bold_enabled) {
+        font_draw_text_box_spaced_family(body_font->size, app->reader_font_index, fb,
+                                         margin + 1, 70, GFX_WIDTH - margin * 2, 690,
+                                         body_text, line_height, GFX_BLACK);
+    }
 
     gfx_fill_rect(fb, 20, 770, 440, 1, GFX_BLACK);
     snprintf(percent_text, sizeof(percent_text), "%d", percent);
@@ -865,7 +914,13 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
 
     snprintf(chapter_progress, sizeof(chapter_progress), "本章 %d / %d  |  全书还剩 %d 页",
              current_page, total_pages, total_pages > current_page ? total_pages - current_page : 0);
-    font_draw_text_aligned_builtin(14, fb, 250, 782, 205, chapter_progress, FONT_ALIGN_RIGHT, GFX_BLACK);
+    if (reader_library_is_truncated(app->current_book) && app->reader_page == total_pages - 1) {
+        font_draw_text_aligned_builtin(12, fb, 170, 782, 285,
+                                       "文件过长，仅显示前 2048 页", FONT_ALIGN_RIGHT, GFX_BLACK);
+    } else {
+        font_draw_text_aligned_builtin(14, fb, 250, 782, 205,
+                                       chapter_progress, FONT_ALIGN_RIGHT, GFX_BLACK);
+    }
 
     if (app->reader_menu_open) {
         const font_face_t *menu = font_get_face(FONT_SIZE_18);
@@ -1441,6 +1496,18 @@ static void settings_divider(gfx_framebuffer_t *fb, int y) {
     gfx_fill_rect(fb, 34, y, 412, 1, GFX_BLACK);
 }
 
+static void settings_draw_selection(gfx_framebuffer_t *fb, const app_state_t *app,
+                                    int index, int y, int row_h) {
+    if (app->settings_selection == index && y > 32 && y < GFX_HEIGHT - 32) {
+        gfx_draw_rounded_rect_thick(fb, 30, y + 2, 420, row_h - 4, 7, 2, GFX_BLACK);
+    }
+}
+
+static void settings_draw_dynamic_value(gfx_framebuffer_t *fb, int y, const char *value) {
+    gfx_fill_rect(fb, 270, y + 5, 150, 46, GFX_WHITE);
+    settings_draw_value(fb, 417, y + 19, value);
+}
+
 static void draw_section_header(gfx_framebuffer_t *fb, int x, int y, const char *text) {
     font_draw_text_builtin(20, fb, x, y, text, GFX_BLACK);
 }
@@ -1454,23 +1521,30 @@ static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const
     const int group_x = 27;
     const int group_w = 428;
     const int row_h = 56;
+    char system_font_name[40];
     if (city < 0 || city > 2) {
         city = 0;
     }
+    copy_short_text(system_font_name, sizeof(system_font_name),
+                    font_manager_family_name(app->system_font_index), 30);
 
     font_draw_text_builtin(36, fb, 30, title_y, "系统设置", GFX_BLACK);
 
     draw_section_header(fb, section_x, 150 - scroll, "网络与连接");
     draw_settings_group_box(fb, group_x, 184 - scroll, group_w, row_h * 2, 7);
+    settings_draw_selection(fb, app, 0, 184 - scroll, row_h);
     settings_draw_item(fb, 184 - scroll, row_h, SETTINGS_ICON_WIFI, "Wi-Fi",
                        app->wifi_connected ? "已连接 Reader_5G" : "未连接", -1);
     settings_divider(fb, 184 + row_h - scroll);
+    settings_draw_selection(fb, app, 1, 184 + row_h - scroll, row_h);
     settings_draw_item(fb, 184 + row_h - scroll, row_h, SETTINGS_ICON_BLUETOOTH, "蓝牙", "已关闭", -1);
 
     draw_section_header(fb, section_x, 330 - scroll, "系统与时间");
     draw_settings_group_box(fb, group_x, 364 - scroll, group_w, row_h * 2, 7);
+    settings_draw_selection(fb, app, 2, 364 - scroll, row_h);
     settings_draw_item(fb, 364 - scroll, row_h, SETTINGS_ICON_WEATHER, "天气城市", cities[city], -1);
     settings_divider(fb, 364 + row_h - scroll);
+    settings_draw_selection(fb, app, 3, 364 + row_h - scroll, row_h);
     {
         char sync_text[32];
         char time_text[8];
@@ -1481,21 +1555,133 @@ static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const
 
     draw_section_header(fb, section_x, 510 - scroll, "电源与性能");
     draw_settings_group_box(fb, group_x, 544 - scroll, group_w, row_h * 2, 7);
+    settings_draw_selection(fb, app, 4, 544 - scroll, row_h);
     settings_draw_item(fb, 544 - scroll, row_h, SETTINGS_ICON_LEAF, "电池节能模式", "", app->power_saving_enabled ? 1 : 0);
     settings_divider(fb, 544 + row_h - scroll);
+    settings_draw_selection(fb, app, 5, 544 + row_h - scroll, row_h);
     settings_draw_item(fb, 544 + row_h - scroll, row_h, SETTINGS_ICON_STORAGE, "存储空间", "已使用 12.6GB / 32GB", -1);
 
     draw_section_header(fb, section_x, 690 - scroll, "内容与服务");
     draw_settings_group_box(fb, group_x, 724 - scroll, group_w, row_h, 7);
+    settings_draw_selection(fb, app, 6, 724 - scroll, row_h);
     settings_draw_item(fb, 724 - scroll, row_h, SETTINGS_ICON_DICT, "字典管理", "已安装 3 个字典", -1);
 
     draw_section_header(fb, section_x, 820 - scroll, "关于与更新");
     draw_settings_group_box(fb, group_x, 854 - scroll, group_w, row_h * 2, 7);
+    settings_draw_selection(fb, app, 7, 854 - scroll, row_h);
     settings_draw_item(fb, 854 - scroll, row_h, SETTINGS_ICON_INFO, "关于设备", "型号 Reader X", -1);
     settings_divider(fb, 854 + row_h - scroll);
+    settings_draw_selection(fb, app, 8, 854 + row_h - scroll, row_h);
     settings_draw_item(fb, 854 + row_h - scroll, row_h, SETTINGS_ICON_UPDATE, "软件更新", "当前版本 1.2.0", -1);
 
+    draw_settings_group_box(fb, group_x, 966 - scroll, group_w, row_h, 7);
+    settings_draw_selection(fb, app, 9, 966 - scroll, row_h);
+    settings_draw_item(fb, 966 - scroll, row_h, SETTINGS_ICON_DICT,
+                       "系统字体", system_font_name, -1);
+
+    settings_draw_dynamic_value(fb, 184 - scroll,
+                                app->wifi_connected ? "Connected" : "Configure");
+    settings_draw_dynamic_value(fb, 240 - scroll,
+                                app->bluetooth_enabled ? "On" : "Off");
+    settings_draw_dynamic_value(fb, 420 - scroll,
+                                app->time_sync_requested ? "Starting..." : "Sync now");
+    settings_draw_dynamic_value(fb, 600 - scroll, "Open SD files");
+    settings_draw_dynamic_value(fb, 724 - scroll,
+                                app->dictionary_enabled ? "Enabled" : "Disabled");
+    settings_draw_dynamic_value(fb, 910 - scroll,
+                                app->update_check_requested ? "Checking..." : "Check now");
+
     home_status_bar(fb, font);
+}
+
+static void render_reader_font_picker(gfx_framebuffer_t *fb, const app_state_t *app,
+                                      const font_t *font) {
+    const int row_top = 126;
+    const int row_height = 62;
+    const int visible_rows = 9;
+    int count = font_manager_family_count();
+    int selection = app->reader_font_selection;
+    int first;
+    (void)font;
+    if (count < 1) count = 1;
+    if (selection < 0 || selection >= count) selection = 0;
+    first = selection - visible_rows / 2;
+    if (first < 0) first = 0;
+    if (first > count - visible_rows) first = count - visible_rows;
+    if (first < 0) first = 0;
+
+    home_status_bar(fb, font);
+    font_draw_text_aligned_builtin(28, fb, 20, 58, 440,
+                                   "选择阅读字体", FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned_builtin(14, fb, 20, 94, 440,
+                                   "按 HOME 确认后立即应用",
+                                   FONT_ALIGN_CENTER, GFX_BLACK);
+    for (int row = 0; row < visible_rows && first + row < count; row++) {
+        int index = first + row;
+        int y = row_top + row * row_height;
+        char name[64];
+        char detail[24] = "";
+        gfx_color_t color = GFX_BLACK;
+        copy_short_text(name, sizeof(name), font_manager_family_name(index), 48);
+        if (index == app->reader_font_index) snprintf(detail, sizeof(detail), "当前");
+        if (index == selection) {
+            gfx_fill_rounded_rect(fb, 24, y, 432, row_height - 6, 8, GFX_BLACK);
+            color = GFX_WHITE;
+        } else {
+            gfx_draw_rounded_rect_thick(fb, 24, y, 432, row_height - 6, 8, 1, GFX_BLACK);
+        }
+        font_draw_text_builtin(20, fb, 44, y + 17, name, color);
+        font_draw_text_aligned_builtin(14, fb, 350, y + 20, 82,
+                                       detail, FONT_ALIGN_RIGHT, color);
+    }
+    font_draw_text_aligned_builtin(14, fb, 20, 760, 440,
+                                   "UP/DOWN 选择   HOME 确认   BACK 取消",
+                                   FONT_ALIGN_CENTER, GFX_BLACK);
+}
+
+static void render_system_font_picker(gfx_framebuffer_t *fb, const app_state_t *app,
+                                      const font_t *font) {
+    const int row_top = 126;
+    const int row_height = 62;
+    const int visible_rows = 9;
+    int count = font_manager_family_count();
+    int selection = app->system_font_selection;
+    int first;
+    (void)font;
+    if (count < 1) count = 1;
+    if (selection < 0 || selection >= count) selection = 0;
+    first = selection - visible_rows / 2;
+    if (first < 0) first = 0;
+    if (first > count - visible_rows) first = count - visible_rows;
+    if (first < 0) first = 0;
+
+    home_status_bar(fb, font);
+    font_draw_text_aligned_builtin(28, fb, 20, 58, 440,
+                                   "选择系统字体", FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned_builtin(14, fb, 20, 94, 440,
+                                   "选择后按 HOME 应用", FONT_ALIGN_CENTER, GFX_BLACK);
+
+    for (int row = 0; row < visible_rows && first + row < count; row++) {
+        int index = first + row;
+        int y = row_top + row * row_height;
+        char name[64];
+        char detail[24] = "";
+        gfx_color_t color = GFX_BLACK;
+        copy_short_text(name, sizeof(name), font_manager_family_name(index), 48);
+        if (index == app->system_font_index) snprintf(detail, sizeof(detail), "当前");
+        if (index == selection) {
+            gfx_fill_rounded_rect(fb, 24, y, 432, row_height - 6, 8, GFX_BLACK);
+            color = GFX_WHITE;
+        } else {
+            gfx_draw_rounded_rect_thick(fb, 24, y, 432, row_height - 6, 8, 1, GFX_BLACK);
+        }
+        font_draw_text_builtin(20, fb, 44, y + 17, name, color);
+        font_draw_text_aligned_builtin(14, fb, 350, y + 20, 82,
+                                       detail, FONT_ALIGN_RIGHT, color);
+    }
+    font_draw_text_aligned_builtin(14, fb, 20, 760, 440,
+                                   "UP/DOWN 选择   HOME 应用   BACK 取消",
+                                   FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
 static void render_wifi_setup(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
@@ -1589,6 +1775,9 @@ void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t 
         case APP_PAGE_READER_SETTINGS:
             render_reader_settings(fb, app, font);
             break;
+        case APP_PAGE_READER_FONT:
+            render_reader_font_picker(fb, app, font);
+            break;
         case APP_PAGE_WEATHER:
             render_weather(fb, app, font);
             break;
@@ -1600,6 +1789,9 @@ void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t 
             break;
         case APP_PAGE_SETTINGS:
             render_settings(fb, app, font);
+            break;
+        case APP_PAGE_SYSTEM_FONT:
+            render_system_font_picker(fb, app, font);
             break;
         case APP_PAGE_WIFI_SETUP:
             render_wifi_setup(fb, app, font);

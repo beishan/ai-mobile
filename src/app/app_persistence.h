@@ -4,19 +4,27 @@
 #include "app/app_state.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
-#define APP_PERSISTENCE_VERSION 1
-#define APP_PERSISTENCE_TEXT_MAX 256
+#define APP_PERSISTENCE_VERSION 2
+#define APP_PERSISTENCE_TEXT_MAX 512
 
 typedef struct {
     int version;
     int current_book;
     int recent_book;
+    uint32_t book_ids[APP_BOOK_COUNT];
     int book_current_pages[APP_BOOK_COUNT];
     int book_bookmark_pages[APP_BOOK_COUNT];
     int reader_font_index;
+    int system_font_index;
     int font_size_index;
     int line_spacing_index;
+    int reader_margin_index;
+    int reader_indent_enabled;
+    int reader_bold_enabled;
+    int reader_page_turn_mode;
+    int reader_refresh_mode;
     int wifi_connected;
     int weather_city_index;
     int power_saving_enabled;

@@ -50,6 +50,9 @@ typedef struct {
     uint8_t *data;           /* Raw font data (malloc'd) */
     int data_size;           /* Total data size in bytes */
     char name[64];           /* Font name for identification */
+    char family[64];         /* Family name derived from filename */
+    char path[512];          /* Source file for streamed ESP rendering */
+    int nominal_size;
 } external_font_t;
 
 int font_load_default(font_t *font);
@@ -86,6 +89,10 @@ int font_manager_load_dir(const char *dirpath);
  * Returns the closest matching loaded external font, or NULL if none loaded. */
 const external_font_t *font_manager_get(int size);
 const external_font_t *font_manager_get_family(int family_index, int size);
+int font_manager_family_count(void);
+const char *font_manager_family_name(int family_index);
+void font_manager_set_system_family(int family_index);
+int font_manager_system_family(void);
 
 /* Check if external fonts are available for a given size */
 int font_manager_has_external(int size);
@@ -97,6 +104,7 @@ void font_manager_free_all(void);
 void font_draw_text_auto(int size, gfx_framebuffer_t *fb, int x, int y, const char *text, gfx_color_t color);
 void font_draw_text_aligned_auto(int size, gfx_framebuffer_t *fb, int x, int y, int width, const char *text, font_align_t align, gfx_color_t color);
 int font_measure_text_auto(int size, const char *text);
+int font_measure_text_family(int size, int family_index, const char *text);
 void font_draw_text_box_spaced_auto(int size, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color);
 void font_draw_text_box_spaced_family(int size, int family_index, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color);
 

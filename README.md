@@ -101,6 +101,8 @@ Hardware status:
 - Text sources may use form-feed (`\f`) for explicit page breaks; plain text without page breaks is split automatically on UTF-8-safe boundaries.
 - The 480 x 800 UI framebuffer is allocated from PSRAM instead of the ESP-IDF main-task stack.
 - The SSD1677 driver uses OTP full refresh for page changes and differential partial refresh for all same-page interactions: home and bookshelf selection, file-list navigation, reader turns/menu/catalog/settings, weather, calendar, English cards, settings, and Wi-Fi editing. Directory reloads and page transitions retain full refresh. Real-panel validation is still pending because the current EPD BUSY signal does not become ready.
+- Partial refreshes are counted globally by the display driver. After 12 consecutive successful partial updates, the next partial request is automatically promoted to a full refresh to clear ghosting; adjust `ESP_EPD_PARTIAL_REFRESH_LIMIT` in `esp_board_config.h` if the panel needs a different interval.
+- TXT pagination now follows the selected font size/family, line spacing, margins, indentation, and bold width. Chapter-like lines are indexed for catalog navigation, progress/bookmarks are matched by stable book IDs instead of shelf position, and files exceeding 2,048 laid-out pages show an explicit truncation warning.
 - Wi-Fi + NTP time sync is ready. Open Settings and press HOME to edit SSID/password on the device, then select “保存并重启校时”. Credentials are stored in NVS; the firmware uses `ntp.aliyun.com`, China Standard Time (`CST-8`), waits up to 12 seconds at boot, and partial-refreshes the status clock every minute.
 
 Current E-Ink wiring:
