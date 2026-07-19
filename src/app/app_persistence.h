@@ -6,8 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define APP_PERSISTENCE_VERSION 2
-#define APP_PERSISTENCE_TEXT_MAX 512
+#define APP_PERSISTENCE_VERSION 3
+#define APP_PERSISTENCE_TEXT_MAX 768
 
 typedef struct {
     int version;
@@ -18,6 +18,7 @@ typedef struct {
     int book_bookmark_pages[APP_BOOK_COUNT];
     int reader_font_index;
     int system_font_index;
+    char system_font_name[64];
     int font_size_index;
     int line_spacing_index;
     int reader_margin_index;
@@ -28,6 +29,9 @@ typedef struct {
     int wifi_connected;
     int weather_city_index;
     int power_saving_enabled;
+    int bookshelf_layout;
+    int bluetooth_enabled;
+    int dictionary_enabled;
 } app_persisted_state_t;
 
 void app_persistence_capture(const app_state_t *app, app_persisted_state_t *snapshot);

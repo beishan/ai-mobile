@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
+import os
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-FONT_PATH = "/System/Library/Fonts/PingFang.ttc"
+FONT_CANDIDATES = [
+    os.environ.get("AI_READER_FONT", ""),
+    "/System/Library/Fonts/PingFang.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+]
+FONT_PATH = next((path for path in FONT_CANDIDATES if path and Path(path).exists()), "")
 OUT_DIR = Path("assets/fonts")
 SIZES = [12, 14, 16, 18, 20, 22, 24]
 MAX_BITMAP_BYTES = 96
@@ -19,6 +26,9 @@ TEXT = """
 这是一个宁静的夜晚城市灯光在远处闪烁像片低垂星空他翻到等待墨水屏缓慢完成，。
 继续查看添加未开关闭项目地址存储卡版本信息
 系统设置网络与连接蓝牙杭州市电源与性能电池节能模式存储空间已使用内容与服务字典管理安装设备
+当前连接局域网已保存的附近扫描暂无其他网络加密开放上下选择返回正在新的
+天气任务内存不足配置不完整城市无效请求初始化失败响应解析服务错误访问权限编号超限稍候证书
+压缩数据解码
 北京市上海市广州市更新于空气质量湿度北风东风南风级日预报今日建议穿衣出行紫外线薄外套适宜中等早晚微凉搭配天气良好外出请做好防晒措施—
 日历劳动节青年节立夏小满儿童节芒种初十十一十二十三十四十五十六十七十八十九二十廿一廿二廿三廿四廿五廿六廿七廿八廿九三十阳历星期四四月初四丙午癸巳乙卯忌读书学习写作订计划旅行散步搬家动土嫁娶安葬诉讼争吵今日事件时间简史第三章英语复习词汇与语法左右滑动切换月份《》–
 阅读设置排版设置字号黑体宋体仿宋书宋大黑正圆更纱唐美行距紧凑适中宽松页边距窄自定义段首缩进每段首行自动缩进两个字符加粗启用后正文将以加粗字体显示翻页动画仿真刷新模式普通快速极速恢复默认应用

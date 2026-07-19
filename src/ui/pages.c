@@ -9,6 +9,7 @@
 #include <time.h>
 
 #define STATUS_BAR_HEIGHT 32
+static const app_state_t *ui_rendering_app;
 
 /* Shared 480x800 portrait layout constants.
  * Content area sits below the status bar and stays inside the side margins. */
@@ -136,12 +137,34 @@ static void home_status_bar(gfx_framebuffer_t *fb, const font_t *font) {
     char time_text[32];
     char status_text[64];
     (void)font;
-    ui_format_time(time_text, sizeof(time_text));
-    snprintf(status_text, sizeof(status_text), "%s  晴 26C 北京", time_text);
+    if (ui_rendering_app != NULL && ui_rendering_app->time_synchronized) {
+        ui_format_time(time_text, sizeof(time_text));
+    } else {
+        snprintf(time_text, sizeof(time_text), "--:--");
+    }
+    if (ui_rendering_app != NULL && ui_rendering_app->weather_valid) {
+        snprintf(status_text, sizeof(status_text), "%s  %s %dC", time_text,
+                 ui_rendering_app->weather_text,
+                 ui_rendering_app->weather_temperature);
+    } else {
+        snprintf(status_text, sizeof(status_text), "%s  天气 --", time_text);
+    }
     font_draw_text(small, fb, 8, text_y, status_text, GFX_BLACK);
-    draw_wifi_icon(fb, GFX_WIDTH - 90, wifi_y, GFX_BLACK);
-    draw_battery_icon(fb, GFX_WIDTH - 66, battery_y, 78, GFX_BLACK);
-    font_draw_text(small, fb, GFX_WIDTH - 36, text_y, "78%", GFX_BLACK);
+    if (ui_rendering_app != NULL && ui_rendering_app->wifi_connected) {
+        draw_wifi_icon(fb, GFX_WIDTH - 90, wifi_y, GFX_BLACK);
+    }
+    draw_battery_icon(fb, GFX_WIDTH - 66, battery_y,
+                      ui_rendering_app != NULL && ui_rendering_app->battery_valid
+                          ? ui_rendering_app->battery_percent : 0,
+                      GFX_BLACK);
+    if (ui_rendering_app != NULL && ui_rendering_app->battery_valid) {
+        char battery_text[8];
+        snprintf(battery_text, sizeof(battery_text), "%d%%",
+                 ui_rendering_app->battery_percent);
+        font_draw_text(small, fb, GFX_WIDTH - 36, text_y, battery_text, GFX_BLACK);
+    } else {
+        font_draw_text(small, fb, GFX_WIDTH - 34, text_y, "--", GFX_BLACK);
+    }
 }
 
 /* Info card shown above the app grid on the home screen.
@@ -191,17 +214,26 @@ static void home_info_card(gfx_framebuffer_t *fb, const app_state_t *app, int x,
     ui_draw_icon(fb, weather_icon, icon_x, icon_y, 0);
 
     int text_x = icon_x + icon_size + 8;
-    char temp_str[16];
-    snprintf(temp_str, sizeof(temp_str), "%d C %s", temps[city], conditions[app->weather_type]);
+    char temp_str[48];
+    snprintf(temp_str, sizeof(temp_str), "%d C %s",
+             app->weather_valid ? app->weather_temperature : temps[city],
+             app->weather_valid ? app->weather_text : conditions[app->weather_type]);
     font_draw_text(temp_font, fb, text_x, y + h / 2 - temp_font->size / 2 - 6, temp_str, GFX_BLACK);
-    font_draw_text(city_font, fb, text_x, y + h / 2 + 6, cities[city], GFX_BLACK);
+    font_draw_text(city_font, fb, text_x, y + h / 2 + 6,
+                   app->weather_valid ? "实时天气" : cities[city], GFX_BLACK);
 
     char clock_text[8];
     char date_text[64];
     struct tm now_tm;
     ui_now(&now_tm);
-    snprintf(clock_text, sizeof(clock_text), "%02d:%02d", now_tm.tm_hour, now_tm.tm_min);
-    snprintf(date_text, sizeof(date_text), "%d年%d月%d日", now_tm.tm_year + 1900, now_tm.tm_mon + 1, now_tm.tm_mday);
+    if (app->time_synchronized) {
+        snprintf(clock_text, sizeof(clock_text), "%02d:%02d", now_tm.tm_hour, now_tm.tm_min);
+        snprintf(date_text, sizeof(date_text), "%d年%d月%d日", now_tm.tm_year + 1900,
+                 now_tm.tm_mon + 1, now_tm.tm_mday);
+    } else {
+        snprintf(clock_text, sizeof(clock_text), "--:--");
+        snprintf(date_text, sizeof(date_text), "等待网络校时");
+    }
     font_draw_text_aligned(clock_font, fb, divider_x, y + h / 2 - clock_font->size / 2 - 8,
                             w - (divider_x - x), clock_text, FONT_ALIGN_CENTER, GFX_BLACK);
     font_draw_text_aligned(small, fb, divider_x, y + h / 2 + small->size / 2 + 2,
@@ -530,6 +562,7 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
 
     bookshelf_status_bar(fb);
 
+    if (app->bookshelf_layout == 0) {
     for (int i = 0; i < display_count; i++) {
         int col = i % 3;
         int row = i / 3;
@@ -555,12 +588,61 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
         font_draw_text_aligned_builtin(author_size, fb, cover_x - 18, author_y, cover_w + 36,
                                        book.author, FONT_ALIGN_CENTER, GFX_BLACK);
     }
+    } else {
+        const int row_h = 76;
+        for (int i = 0; i < display_count; i++) {
+            const reader_book_t *book = reader_library_book(i);
+            int y = 58 + i * row_h;
+            int total = app->book_pages[i];
+            int current = app->book_current_pages[i];
+            int percent = total > 0 ? current * 100 / total : 0;
+            char title[52];
+            char detail[64];
+            char progress[16];
+            if (book == NULL) continue;
+            copy_short_text(title, sizeof(title), book->title, 34);
+            snprintf(detail, sizeof(detail), "%s  ·  %s", book->author, book->size_label);
+            snprintf(progress, sizeof(progress), "%d%%", percent);
+            if (app->bookshelf_selection == i) {
+                gfx_draw_rounded_rect_thick(fb, 18, y + 2, 444, row_h - 4, 7, 2, GFX_BLACK);
+            }
+            gfx_draw_rounded_rect_thick(fb, 31, y + 10, 42, 54, 3, 1, GFX_BLACK);
+            font_draw_text_aligned_builtin(12, fb, 31, y + 30, 42,
+                                           book->file_type, FONT_ALIGN_CENTER, GFX_BLACK);
+            font_draw_text_builtin(20, fb, 88, y + 12, title, GFX_BLACK);
+            font_draw_text_builtin(13, fb, 88, y + 43, detail, GFX_BLACK);
+            font_draw_text_aligned_builtin(14, fb, 394, y + 28, 54,
+                                           progress, FONT_ALIGN_RIGHT, GFX_BLACK);
+            if (i + 1 < display_count) gfx_fill_rect(fb, 86, y + row_h - 1, 362, 1, GFX_BLACK);
+        }
+    }
 
     if (display_count == 0) {
-        font_draw_text_aligned_builtin(20, fb, 24, 360, 432,
-                                       "未发现 SD 卡 TXT 书籍", FONT_ALIGN_CENTER, GFX_BLACK);
-        font_draw_text_aligned_builtin(14, fb, 24, 400, 432,
-                                       "请放入 /books 后重启设备", FONT_ALIGN_CENTER, GFX_BLACK);
+        if (app->reader_library_loading) {
+            font_draw_text_aligned_builtin(20, fb, 24, 360, 432,
+                                           "正在加载书库", FONT_ALIGN_CENTER, GFX_BLACK);
+            font_draw_text_aligned_builtin(14, fb, 24, 400, 432,
+                                           "书籍加载完成后将自动显示", FONT_ALIGN_CENTER, GFX_BLACK);
+        } else {
+            font_draw_text_aligned_builtin(20, fb, 24, 360, 432,
+                                           "未发现 TXT 书籍", FONT_ALIGN_CENTER, GFX_BLACK);
+            font_draw_text_aligned_builtin(14, fb, 24, 400, 432,
+                                           "请将书籍放入 SD 卡 /books 目录", FONT_ALIGN_CENTER, GFX_BLACK);
+        }
+    }
+    if (app->reader_library_loading) {
+        char progress_text[32];
+        int percent = app->reader_library_progress;
+        int fill_width;
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        snprintf(progress_text, sizeof(progress_text), "加载进度 %d%%", percent);
+        font_draw_text_builtin(14, fb, 20, 38, progress_text, GFX_BLACK);
+        gfx_draw_rounded_rect_thick(fb, 248, 40, 212, 14, 3, 1, GFX_BLACK);
+        fill_width = percent * 206 / 100;
+        if (fill_width > 0) {
+            gfx_fill_rounded_rect(fb, 251, 43, fill_width, 8, 2, GFX_BLACK);
+        }
     }
     gfx_fill_rect(fb, 0, 768, GFX_WIDTH, 1, GFX_BLACK);
     {
@@ -630,7 +712,7 @@ static void reader_settings_divider(gfx_framebuffer_t *fb, int y) {
 
 static void reader_settings_selection(gfx_framebuffer_t *fb, const app_state_t *app, int index, int y, int h) {
     if (app->reader_settings_selection == index) {
-        int thickness = index == 0 && app->reader_settings_editing ? 3 : 1;
+        int thickness = app->reader_settings_editing ? 3 : 1;
         gfx_draw_rounded_rect_thick(fb, 27, y + 5, 426, h - 10, 3, thickness, GFX_BLACK);
     }
 }
@@ -712,10 +794,30 @@ static void render_reader_settings(gfx_framebuffer_t *fb, const app_state_t *app
     const char *margin_labels[] = {"窄", "适中", "宽", "超宽"};
     const int font_sizes[] = {16, 18, 20, 22, 24};
     int font_value = app->reader_settings_editing
+                         && app->reader_settings_selection == 0
                          ? app->reader_pending_font_size_index
                          : app->font_size_index;
-    int spacing_value = app->line_spacing_index;
-    int margin = app->reader_margin_index;
+    int font_family_value = app->reader_settings_editing && app->reader_settings_selection == 1
+                                ? app->reader_pending_font_index
+                                : app->reader_font_index;
+    int spacing_value = app->reader_settings_editing && app->reader_settings_selection == 2
+                            ? app->reader_pending_line_spacing_index
+                            : app->line_spacing_index;
+    int margin = app->reader_settings_editing && app->reader_settings_selection == 3
+                     ? app->reader_pending_margin_index
+                     : app->reader_margin_index;
+    int indent_enabled = app->reader_settings_editing && app->reader_settings_selection == 4
+                             ? app->reader_pending_indent_enabled
+                             : app->reader_indent_enabled;
+    int bold_enabled = app->reader_settings_editing && app->reader_settings_selection == 5
+                           ? app->reader_pending_bold_enabled
+                           : app->reader_bold_enabled;
+    int page_turn_mode = app->reader_settings_editing && app->reader_settings_selection == 6
+                             ? app->reader_pending_page_turn_mode
+                             : app->reader_page_turn_mode;
+    int refresh_mode = app->reader_settings_editing && app->reader_settings_selection == 7
+                           ? app->reader_pending_refresh_mode
+                           : app->reader_refresh_mode;
     char reader_font_name[40];
     (void)font;
     if (font_value < 0 || font_value > 4) {
@@ -728,7 +830,7 @@ static void render_reader_settings(gfx_framebuffer_t *fb, const app_state_t *app
         margin = 1;
     }
     copy_short_text(reader_font_name, sizeof(reader_font_name),
-                    font_manager_family_name(app->reader_font_index), 36);
+                    font_manager_family_name(font_family_value), 36);
 
     bookshelf_status_bar(fb);
     font_draw_text_aligned_builtin(28, fb, 0, 50, GFX_WIDTH, "阅读设置", FONT_ALIGN_CENTER, GFX_BLACK);
@@ -776,24 +878,24 @@ static void render_reader_settings(gfx_framebuffer_t *fb, const app_state_t *app
     reader_settings_selection(fb, app, 4, 462, 68);
     font_draw_text_builtin(20, fb, 40, 482, "段首缩进", GFX_BLACK);
     font_draw_text_builtin(14, fb, 40, 512, "每段首行自动缩进两个字符", GFX_BLACK);
-    reader_settings_toggle(fb, 392, 490, app->reader_indent_enabled);
+    reader_settings_toggle(fb, 392, 490, indent_enabled);
     reader_settings_divider(fb, 530);
 
     reader_settings_selection(fb, app, 5, 530, 68);
     font_draw_text_builtin(20, fb, 40, 550, "加粗", GFX_BLACK);
     font_draw_text_builtin(14, fb, 40, 580, "启用后正文将以加粗字体显示", GFX_BLACK);
-    reader_settings_toggle(fb, 392, 558, app->reader_bold_enabled);
+    reader_settings_toggle(fb, 392, 558, bold_enabled);
     reader_settings_divider(fb, 598);
 
     reader_settings_selection(fb, app, 6, 598, 58);
     font_draw_text_builtin(20, fb, 40, 619, "翻页动画", GFX_BLACK);
-    font_draw_text_builtin(20, fb, 378, 619, app->reader_page_turn_mode == 0 ? "仿真" : app->reader_page_turn_mode == 1 ? "平移" : "无", GFX_BLACK);
+    font_draw_text_builtin(20, fb, 378, 619, page_turn_mode == 0 ? "仿真" : page_turn_mode == 1 ? "平移" : "无", GFX_BLACK);
     settings_draw_arrow(fb, 432, 619);
     reader_settings_divider(fb, 656);
 
     reader_settings_selection(fb, app, 7, 656, 60);
     font_draw_text_builtin(20, fb, 40, 680, "刷新模式", GFX_BLACK);
-    reader_settings_segment(fb, 216, 672, 228, 30, refresh_labels, 3, app->reader_refresh_mode);
+    reader_settings_segment(fb, 216, 672, 228, 30, refresh_labels, 3, refresh_mode);
 
     if (app->reader_settings_selection == 8) {
         gfx_draw_rect(fb, 30, 738, 420, 50, GFX_BLACK);
@@ -914,7 +1016,12 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
 
     snprintf(chapter_progress, sizeof(chapter_progress), "本章 %d / %d  |  全书还剩 %d 页",
              current_page, total_pages, total_pages > current_page ? total_pages - current_page : 0);
-    if (reader_library_is_truncated(app->current_book) && app->reader_page == total_pages - 1) {
+    if (app->reader_background_pagination_active) {
+        snprintf(chapter_progress, sizeof(chapter_progress), "后台分页 %d%%  |  当前可读 %d 页",
+                 app->reader_background_pagination_progress, total_pages);
+        font_draw_text_aligned_builtin(14, fb, 180, 782, 275,
+                                       chapter_progress, FONT_ALIGN_RIGHT, GFX_BLACK);
+    } else if (reader_library_is_truncated(app->current_book) && app->reader_page == total_pages - 1) {
         font_draw_text_aligned_builtin(12, fb, 170, 782, 285,
                                        "文件过长，仅显示前 2048 页", FONT_ALIGN_RIGHT, GFX_BLACK);
     } else {
@@ -926,20 +1033,18 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
         const font_face_t *menu = font_get_face(FONT_SIZE_18);
         int has_bookmark = app->book_bookmark_pages[app->current_book] == app->reader_page;
         const char *items[] = {
-            "继续阅读",
             "查看目录",
             has_bookmark ? "已加书签" : "添加书签",
-            "阅读设置",
-            "退出到书架"
+            "阅读设置"
         };
         /* Centered menu overlay */
         int menu_w = 320;
-        int menu_h = 5 * 40 + 24;
+        int menu_h = 3 * 40 + 24;
         int menu_x = (GFX_WIDTH - menu_w) / 2;
         int menu_y = (GFX_HEIGHT - menu_h) / 2;
         gfx_fill_rect(fb, menu_x, menu_y, menu_w, menu_h, GFX_WHITE);
         gfx_draw_rounded_rect_thick(fb, menu_x, menu_y, menu_w, menu_h, 10, 2, GFX_BLACK);
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 3; i++) {
             int y = menu_y + 20 + i * 40;
             gfx_color_t color = GFX_BLACK;
             if (app->reader_menu_selection == i) {
@@ -952,23 +1057,26 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
 }
 
 static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    const char *cities[] = {"北京市", "上海市", "广州市"};
-    const char *conditions[] = {"晴", "多云", "小雨"};
-    const int temps[] = {23, 22, 29};
-    const int humidities[] = {32, 72, 61};
-    const char *wind[] = {"北风 2级", "东风 3级", "南风 2级"};
-    int city = app->weather_city_index;
     int scroll = app->weather_scroll;
-    if (city < 0 || city > 2) {
-        city = 0;
+    if (!app->weather_valid) {
+        font_draw_text_aligned_builtin(28, fb, 0, 180, GFX_WIDTH,
+                                       "暂无实时天气", FONT_ALIGN_CENTER, GFX_BLACK);
+        font_draw_text_aligned_builtin(16, fb, 24, 235, 432,
+                                       !app->wifi_connected
+                                           ? "连接 Wi-Fi 后将自动更新"
+                                           : (app->weather_error[0]
+                                                  ? app->weather_error
+                                                  : "正在请求和风天气，请稍候"),
+                                       FONT_ALIGN_CENTER, GFX_BLACK);
+        home_status_bar(fb, font);
+        return;
     }
-
     gfx_fill_rect(fb, 0, 48 - scroll, GFX_WIDTH, 1, GFX_BLACK);
 
     settings_draw_circle(fb, 46, 96 - scroll, 9, 2, GFX_BLACK);
     settings_fill_circle(fb, 46, 96 - scroll, 3, GFX_BLACK);
     settings_draw_line(fb, 46, 109 - scroll, 40, 99 - scroll, 2, GFX_BLACK);
-    font_draw_text_builtin(24, fb, 64, 86 - scroll, cities[city], GFX_BLACK);
+    font_draw_text_builtin(24, fb, 64, 86 - scroll, "实时天气", GFX_BLACK);
     settings_draw_arrow(fb, 138, 90 - scroll);
     {
         char updated[32];
@@ -978,14 +1086,15 @@ static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const 
         font_draw_text_builtin(14, fb, 38, 126 - scroll, updated, GFX_BLACK);
     }
 
-    font_draw_text_builtin(36, fb, 38, 178 - scroll, conditions[city], GFX_BLACK);
+    font_draw_text_builtin(36, fb, 38, 178 - scroll, app->weather_text, GFX_BLACK);
     font_draw_text_builtin(18, fb, 38, 236 - scroll, "空气质量", GFX_BLACK);
     gfx_draw_rounded_rect_thick(fb, 116, 233 - scroll, 20, 20, 3, 1, GFX_BLACK);
     font_draw_text_builtin(14, fb, 120, 236 - scroll, "良", GFX_BLACK);
     font_draw_text_builtin(18, fb, 148, 236 - scroll, "58", GFX_BLACK);
     {
         char detail[48];
-        snprintf(detail, sizeof(detail), "湿度 %d%%   |   %s", humidities[city], wind[city]);
+        snprintf(detail, sizeof(detail), "湿度 %d%%   |   %s",
+                 app->weather_humidity, app->weather_wind);
         font_draw_text_builtin(18, fb, 38, 282 - scroll, detail, GFX_BLACK);
     }
 
@@ -1000,13 +1109,21 @@ static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const 
     settings_draw_line(fb, 396, 189 - scroll, 383, 176 - scroll, 4, GFX_BLACK);
     {
         char temp_text[8];
-        snprintf(temp_text, sizeof(temp_text), "%d", temps[city]);
+        snprintf(temp_text, sizeof(temp_text), "%d", app->weather_temperature);
         draw_weather_big_number(fb, 302, 232 - scroll, temp_text);
         settings_draw_circle(fb, 412, 274 - scroll, 4, 1, GFX_BLACK);
         font_draw_text_builtin(24, fb, 423, 266 - scroll, "C", GFX_BLACK);
     }
 
     gfx_fill_rect(fb, 15, 350 - scroll, 450, 1, GFX_BLACK);
+    font_draw_text_aligned_builtin(18, fb, 20, 390 - scroll, 440,
+                                   "当前显示和风天气实时观测数据",
+                                   FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_aligned_builtin(14, fb, 20, 430 - scroll, 440,
+                                   "逐日预报尚未请求", FONT_ALIGN_CENTER, GFX_BLACK);
+    home_status_bar(fb, font);
+    return;
+#if 0 /* Mock forecast and lifestyle data retired; real-time API data is shown above. */
     font_draw_text_builtin(20, fb, 30, 368 - scroll, "5日预报", GFX_BLACK);
     {
         const char *dates[] = {"05/20", "05/21", "05/22", "05/23", "05/24"};
@@ -1065,6 +1182,7 @@ static void render_weather(gfx_framebuffer_t *fb, const app_state_t *app, const 
     }
     font_draw_text_aligned_builtin(14, fb, 0, 940 - scroll, GFX_WIDTH, "— 1 / 1 —", FONT_ALIGN_CENTER, GFX_BLACK);
     home_status_bar(fb, font);
+#endif
 }
 
 static void calendar_draw_chevron(gfx_framebuffer_t *fb, int x, int y, int right) {
@@ -1534,7 +1652,7 @@ static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const
     draw_settings_group_box(fb, group_x, 184 - scroll, group_w, row_h * 2, 7);
     settings_draw_selection(fb, app, 0, 184 - scroll, row_h);
     settings_draw_item(fb, 184 - scroll, row_h, SETTINGS_ICON_WIFI, "Wi-Fi",
-                       app->wifi_connected ? "已连接 Reader_5G" : "未连接", -1);
+                       app->wifi_connected ? "已连接" : "未连接", -1);
     settings_divider(fb, 184 + row_h - scroll);
     settings_draw_selection(fb, app, 1, 184 + row_h - scroll, row_h);
     settings_draw_item(fb, 184 + row_h - scroll, row_h, SETTINGS_ICON_BLUETOOTH, "蓝牙", "已关闭", -1);
@@ -1574,10 +1692,14 @@ static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const
     settings_draw_selection(fb, app, 8, 854 + row_h - scroll, row_h);
     settings_draw_item(fb, 854 + row_h - scroll, row_h, SETTINGS_ICON_UPDATE, "软件更新", "当前版本 1.2.0", -1);
 
-    draw_settings_group_box(fb, group_x, 966 - scroll, group_w, row_h, 7);
+    draw_settings_group_box(fb, group_x, 966 - scroll, group_w, row_h * 2, 7);
     settings_draw_selection(fb, app, 9, 966 - scroll, row_h);
     settings_draw_item(fb, 966 - scroll, row_h, SETTINGS_ICON_DICT,
                        "系统字体", system_font_name, -1);
+    settings_divider(fb, 966 + row_h - scroll);
+    settings_draw_selection(fb, app, 10, 966 + row_h - scroll, row_h);
+    settings_draw_item(fb, 966 + row_h - scroll, row_h, SETTINGS_ICON_STORAGE,
+                       "书架布局", app->bookshelf_layout == 0 ? "网格" : "列表", -1);
 
     settings_draw_dynamic_value(fb, 184 - scroll,
                                 app->wifi_connected ? "Connected" : "Configure");
@@ -1614,7 +1736,7 @@ static void render_reader_font_picker(gfx_framebuffer_t *fb, const app_state_t *
     font_draw_text_aligned_builtin(28, fb, 20, 58, 440,
                                    "选择阅读字体", FONT_ALIGN_CENTER, GFX_BLACK);
     font_draw_text_aligned_builtin(14, fb, 20, 94, 440,
-                                   "按 HOME 确认后立即应用",
+                                   "按 HOME 确认，退出阅读设置后应用",
                                    FONT_ALIGN_CENTER, GFX_BLACK);
     for (int row = 0; row < visible_rows && first + row < count; row++) {
         int index = first + row;
@@ -1684,56 +1806,206 @@ static void render_system_font_picker(gfx_framebuffer_t *fb, const app_state_t *
                                    FONT_ALIGN_CENTER, GFX_BLACK);
 }
 
-static void render_wifi_setup(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    char password_mask[33];
-    char character[2];
-    int password_length = (int)strlen(app->wifi_password);
-    const char *rows[] = {"Wi-Fi 名称 (SSID)", "Wi-Fi 密码", "保存并重启校时"};
-    const char *values[] = {app->wifi_ssid[0] != '\0' ? app->wifi_ssid : "未设置",
-                            password_mask, "写入 NVS"};
-    const int row_top = 186;
-    const int row_height = 96;
+static void render_wifi_networks(gfx_framebuffer_t *fb, const app_state_t *app) {
+    char line[80];
+    int saved_first = 0;
+    int scan_first = 0;
+    const int saved_visible = 2;
+    const int scan_visible = 5;
 
-    (void)font;
-    if (password_length > 32) {
-        password_length = 32;
-    }
-    for (int i = 0; i < password_length; i++) {
-        password_mask[i] = '*';
-    }
-    password_mask[password_length] = '\0';
-    character[0] = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.@!#"[app->wifi_edit_char_index];
-    character[1] = '\0';
+    font_draw_text_builtin(29, fb, 22, 54, "Wi-Fi", GFX_BLACK);
 
-    home_status_bar(fb, font);
-    font_draw_text_builtin(30, fb, 28, 72, "Wi-Fi 配置", GFX_BLACK);
-    font_draw_text_builtin(14, fb, 28, 105, "保存后设备会重启，并自动连接 Wi-Fi 校时", GFX_BLACK);
+    /* Current connection card is informational and is not part of the selection list. */
+    gfx_draw_rounded_rect_thick(fb, 18, 91, 444, 96, 10, 2, GFX_BLACK);
+    font_draw_text_builtin(14, fb, 34, 103, "当前连接", GFX_BLACK);
+    font_draw_text_builtin(21, fb, 34, 126,
+                           app->wifi_connected && app->wifi_ssid[0] ? app->wifi_ssid : "未连接",
+                           GFX_BLACK);
+    font_draw_text_aligned_builtin(14, fb, 316, 107, 126,
+                                   app->wifi_connected ? "已连接" : "未连接",
+                                   FONT_ALIGN_RIGHT, GFX_BLACK);
+    snprintf(line, sizeof(line), "局域网 IP：%s",
+             app->wifi_connected && app->wifi_ip[0] ? app->wifi_ip : "--");
+    font_draw_text_builtin(14, fb, 34, 158, line, GFX_BLACK);
 
-    for (int i = 0; i < 3; i++) {
-        int y = row_top + i * row_height;
-        if (!app->wifi_editor_active && app->wifi_setup_selection == i) {
-            gfx_fill_rounded_rect(fb, 20, y, 440, 76, 10, GFX_BLACK);
-            font_draw_text_builtin(20, fb, 40, y + 14, rows[i], GFX_WHITE);
-            font_draw_text_builtin(16, fb, 40, y + 44, values[i], GFX_WHITE);
-        } else {
-            gfx_draw_rounded_rect_thick(fb, 20, y, 440, 76, 10, 1, GFX_BLACK);
-            font_draw_text_builtin(20, fb, 40, y + 14, rows[i], GFX_BLACK);
-            font_draw_text_builtin(16, fb, 40, y + 44, values[i], GFX_BLACK);
+    font_draw_text_builtin(17, fb, 22, 204, "已保存的 Wi-Fi", GFX_BLACK);
+    if (app->wifi_saved_count <= 0) {
+        font_draw_text_builtin(14, fb, 34, 239, "暂无其他已保存网络", GFX_BLACK);
+    } else {
+        if (app->wifi_network_selection < app->wifi_saved_count &&
+            app->wifi_network_selection >= saved_visible) {
+            saved_first = app->wifi_network_selection - saved_visible + 1;
+        }
+        for (int row = 0; row < saved_visible && saved_first + row < app->wifi_saved_count; row++) {
+            int index = saved_first + row;
+            int y = 229 + row * 50;
+            gfx_color_t color = GFX_BLACK;
+            if (index == app->wifi_network_selection) {
+                gfx_fill_rounded_rect(fb, 18, y, 444, 44, 7, GFX_BLACK);
+                color = GFX_WHITE;
+            } else {
+                gfx_draw_rounded_rect_thick(fb, 18, y, 444, 44, 7, 1, GFX_BLACK);
+            }
+            font_draw_text_builtin(17, fb, 32, y + 11, app->wifi_saved_ssids[index], color);
+            font_draw_text_aligned_builtin(13, fb, 350, y + 14, 92,
+                                           "已保存", FONT_ALIGN_RIGHT, color);
         }
     }
 
-    if (app->wifi_editor_active) {
-        int y = row_top + app->wifi_setup_selection * row_height;
-        gfx_draw_rounded_rect_thick(fb, 16, y - 4, 448, 84, 12, 3, GFX_BLACK);
-        font_draw_text_builtin(20, fb, 28, 540, "正在编辑", GFX_BLACK);
-        font_draw_text_builtin(20, fb, 162, 540, "当前字符:", GFX_BLACK);
-        gfx_draw_rounded_rect_thick(fb, 320, 520, 72, 48, 8, 2, GFX_BLACK);
-        font_draw_text_aligned_builtin(24, fb, 320, 532, 72, character, FONT_ALIGN_CENTER, GFX_BLACK);
-        font_draw_text_aligned_builtin(16, fb, 24, 602, 432,
-                                       "UP/DOWN 选字符  HOME 添加  POWER 删除  BACK 完成", FONT_ALIGN_CENTER, GFX_BLACK);
+    font_draw_text_builtin(17, fb, 22, 337, "附近的 Wi-Fi", GFX_BLACK);
+    if (app->wifi_scan_in_progress) {
+        font_draw_text_aligned_builtin(17, fb, 0, 390, GFX_WIDTH,
+                                       "正在扫描...", FONT_ALIGN_CENTER, GFX_BLACK);
+    } else if (app->wifi_network_count <= 0) {
+        font_draw_text_aligned_builtin(16, fb, 0, 390, GFX_WIDTH,
+                                       "未发现新的 Wi-Fi 网络", FONT_ALIGN_CENTER, GFX_BLACK);
     } else {
-        font_draw_text_aligned_builtin(16, fb, 24, 602, 432,
-                                       "UP/DOWN 选择  HOME 编辑或保存  BACK 返回", FONT_ALIGN_CENTER, GFX_BLACK);
+        int selected_scan = app->wifi_network_selection - app->wifi_saved_count;
+        if (selected_scan >= scan_visible) scan_first = selected_scan - scan_visible + 1;
+        for (int row = 0; row < scan_visible && scan_first + row < app->wifi_network_count; row++) {
+            int scan_index = scan_first + row;
+            int selection_index = app->wifi_saved_count + scan_index;
+            int y = 365 + row * 68;
+            gfx_color_t color = GFX_BLACK;
+            snprintf(line, sizeof(line), "%ddBm  %s",
+                     app->wifi_network_rssi[scan_index],
+                     app->wifi_network_secure[scan_index] ? "加密" : "开放");
+            if (selection_index == app->wifi_network_selection) {
+                gfx_fill_rounded_rect(fb, 18, y, 444, 58, 8, GFX_BLACK);
+                color = GFX_WHITE;
+            } else {
+                gfx_draw_rounded_rect_thick(fb, 18, y, 444, 58, 8, 1, GFX_BLACK);
+            }
+            font_draw_text_builtin(17, fb, 32, y + 8,
+                                   app->wifi_network_ssids[scan_index], color);
+            font_draw_text_aligned_builtin(13, fb, 290, y + 34, 152,
+                                           line, FONT_ALIGN_RIGHT, color);
+        }
+    }
+    font_draw_text_aligned_builtin(13, fb, 8, 744, 464,
+                                   "上下选择  HOME 连接  POWER 扫描  BACK 返回",
+                                   FONT_ALIGN_CENTER, GFX_BLACK);
+}
+
+static void render_wifi_setup(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
+    char password_mask[33];
+    int password_length = (int)strlen(app->wifi_password);
+    static const char keyboard[] =
+        " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.@!#";
+
+    if (password_length > 30) password_length = 30;
+    memset(password_mask, '*', (size_t)password_length);
+    password_mask[password_length] = '\0';
+    home_status_bar(fb, font);
+
+    if (app->wifi_setup_stage == APP_WIFI_STAGE_NETWORKS) {
+        render_wifi_networks(fb, app);
+        return;
+        int first = 0;
+        const int visible_rows = 8;
+        font_draw_text_builtin(30, fb, 24, 66, "选择 Wi-Fi", GFX_BLACK);
+        if (app->wifi_connected && app->wifi_ssid[0] != '\0') {
+            char connected_text[64];
+            snprintf(connected_text, sizeof(connected_text), "当前已连接：%.32s", app->wifi_ssid);
+            font_draw_text_builtin(14, fb, 26, 104, connected_text, GFX_BLACK);
+        } else {
+            font_draw_text_builtin(14, fb, 26, 104, "未连接 · 扫描附近的无线网络", GFX_BLACK);
+        }
+        if (app->wifi_scan_in_progress) {
+            font_draw_text_aligned_builtin(24, fb, 0, 350, GFX_WIDTH,
+                                           "正在扫描 Wi-Fi...", FONT_ALIGN_CENTER, GFX_BLACK);
+        } else if (app->wifi_network_count <= 0) {
+            font_draw_text_aligned_builtin(22, fb, 0, 330, GFX_WIDTH,
+                                           "未发现 Wi-Fi 网络", FONT_ALIGN_CENTER, GFX_BLACK);
+            font_draw_text_aligned_builtin(16, fb, 0, 375, GFX_WIDTH,
+                                           "按 POWER 重新扫描", FONT_ALIGN_CENTER, GFX_BLACK);
+        } else {
+            if (app->wifi_network_selection >= visible_rows) {
+                first = app->wifi_network_selection - visible_rows + 1;
+            }
+            for (int row = 0; row < visible_rows && first + row < app->wifi_network_count; row++) {
+                int index = first + row;
+                int y = 132 + row * 68;
+                char detail[48];
+                gfx_color_t color = GFX_BLACK;
+                if (app->wifi_connected &&
+                    strcmp(app->wifi_network_ssids[index], app->wifi_ssid) == 0) {
+                    snprintf(detail, sizeof(detail), "已连接  %ddBm",
+                             app->wifi_network_rssi[index]);
+                } else {
+                    snprintf(detail, sizeof(detail), "%ddBm  %s",
+                             app->wifi_network_rssi[index],
+                             app->wifi_network_secure[index] ? "加密" : "开放");
+                }
+                if (index == app->wifi_network_selection) {
+                    gfx_fill_rounded_rect(fb, 18, y, 444, 58, 8, GFX_BLACK);
+                    color = GFX_WHITE;
+                } else {
+                    gfx_draw_rounded_rect_thick(fb, 18, y, 444, 58, 8, 1, GFX_BLACK);
+                }
+                font_draw_text_builtin(18, fb, 34, y + 10,
+                                       app->wifi_network_ssids[index], color);
+                font_draw_text_aligned_builtin(13, fb, 290, y + 34, 152,
+                                               detail, FONT_ALIGN_RIGHT, color);
+            }
+        }
+        font_draw_text_aligned_builtin(13, fb, 12, 744, 456,
+                                       "UP/DOWN 选择  HOME 确认  POWER 扫描  BACK 返回",
+                                       FONT_ALIGN_CENTER, GFX_BLACK);
+        return;
+    }
+
+    font_draw_text_builtin(27, fb, 24, 64, "输入 Wi-Fi 密码", GFX_BLACK);
+    font_draw_text_builtin(15, fb, 26, 102,
+                           app->wifi_ssid[0] ? app->wifi_ssid : "未选择网络", GFX_BLACK);
+    gfx_draw_rounded_rect_thick(fb, 20, 132, 440, 54, 8, 1, GFX_BLACK);
+    font_draw_text_builtin(18, fb, 34, 148,
+                           password_length > 0 ? password_mask : "密码为空", GFX_BLACK);
+
+    if (app->wifi_setup_stage == APP_WIFI_STAGE_KEYBOARD) {
+        int character_count = (int)strlen(keyboard);
+        for (int i = 0; i < character_count; i++) {
+            int column = i % 10;
+            int row = i / 10;
+            int x = 17 + column * 45;
+            int y = 216 + row * 58;
+            char key[3] = {keyboard[i], '\0', '\0'};
+            gfx_color_t color = GFX_BLACK;
+            if (keyboard[i] == ' ') {
+                key[0] = 'S';
+                key[1] = 'P';
+            }
+            if (i == app->wifi_edit_char_index) {
+                gfx_fill_rounded_rect(fb, x, y, 40, 46, 6, GFX_BLACK);
+                color = GFX_WHITE;
+            } else {
+                gfx_draw_rounded_rect_thick(fb, x, y, 40, 46, 6, 1, GFX_BLACK);
+            }
+            font_draw_text_aligned_builtin(17, fb, x, y + 13, 40,
+                                           key, FONT_ALIGN_CENTER, color);
+        }
+        font_draw_text_aligned_builtin(13, fb, 8, 744, 464,
+                                       "UP/DOWN 选字符  HOME 输入  POWER 删除  BACK 完成",
+                                       FONT_ALIGN_CENTER, GFX_BLACK);
+    } else {
+        const char *actions[] = {"重新编辑密码", "保存并连接"};
+        for (int i = 0; i < 2; i++) {
+            int y = 270 + i * 92;
+            gfx_color_t color = GFX_BLACK;
+            if (app->wifi_setup_selection == i) {
+                gfx_fill_rounded_rect(fb, 40, y, 400, 68, 10, GFX_BLACK);
+                color = GFX_WHITE;
+            } else {
+                gfx_draw_rounded_rect_thick(fb, 40, y, 400, 68, 10, 1, GFX_BLACK);
+            }
+            font_draw_text_aligned_builtin(20, fb, 40, y + 22, 400,
+                                           actions[i], FONT_ALIGN_CENTER, color);
+        }
+        font_draw_text_aligned_builtin(14, fb, 18, 510, 444,
+                                       "保存后设备将重启并自动连接该网络", FONT_ALIGN_CENTER, GFX_BLACK);
+        font_draw_text_aligned_builtin(13, fb, 8, 744, 464,
+                                       "UP/DOWN 选择  HOME 确认  BACK 返回网络列表",
+                                       FONT_ALIGN_CENTER, GFX_BLACK);
     }
 }
 
@@ -1755,6 +2027,11 @@ void ui_render_page(gfx_framebuffer_t *fb, const app_state_t *app, const font_t 
         return;
     }
 
+    /* Reader text is rendered with its own family. Every surrounding page must
+     * explicitly restore the configured system family so a reader render can
+     * never leak its font context into the bookshelf or other UI pages. */
+    font_manager_set_system_family(app->system_font_index);
+    ui_rendering_app = app;
     gfx_clear(fb, GFX_WHITE);
     switch (app->page) {
         case APP_PAGE_HOME:

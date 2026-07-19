@@ -10,16 +10,21 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
+
 #define READER_MAX_PAGES 2048
 #define READER_MAX_CHAPTERS 128
 #define READER_PAGE_TEXT_MAX 4096
 #define READER_BOOK_PATH_MAX 512
 #define READER_META_TEXT_MAX 160
 #define READER_CHAPTER_TITLE_MAX 96
-#define READER_CACHE_VERSION 1
+#define READER_CACHE_VERSION 2
 #define READER_CACHE_FILE_NAME ".ai_mobile_index.bin"
 #define READER_CACHE_TEMP_NAME ".ai_mobile_index.tmp"
 #define READER_CACHE_BACKUP_NAME ".ai_mobile_index.bak"
+#define READER_INITIAL_READY_PAGES 32
 
 typedef struct {
     reader_book_t info;
@@ -36,6 +41,8 @@ typedef struct {
     int chapter_count;
     int truncated;
     int loaded;
+    int layout_valid;
+    int layout_complete;
 } reader_book_slot_t;
 
 typedef struct {
@@ -64,15 +71,68 @@ typedef struct {
     int32_t page_count;
     int32_t chapter_count;
     int32_t truncated;
+    int32_t layout_valid;
+    int32_t layout_complete;
     uint32_t page_offsets[READER_MAX_PAGES + 1];
     char chapter_titles[READER_MAX_CHAPTERS][READER_CHAPTER_TITLE_MAX];
     int32_t chapter_pages[READER_MAX_CHAPTERS];
 } reader_cache_entry_t;
 
-static reader_book_slot_t slots[APP_BOOK_COUNT];
+static reader_book_slot_t *slots;
 static char page_text[READER_PAGE_TEXT_MAX];
 static reader_layout_t layout = {20, 0, 424, 690, 36, 1, 0};
 static char cache_directory[READER_BOOK_PATH_MAX];
+static reader_library_progress_callback_t progress_callback;
+static void *progress_context;
+static reader_book_slot_t *background_result;
+static reader_layout_t background_result_layout;
+static uint32_t background_result_book_id;
+static int background_result_book_index = -1;
+static volatile int background_result_ready;
+static volatile int background_progress;
+
+static void *reader_large_calloc(size_t count, size_t size) {
+#ifdef ESP_PLATFORM
+    return heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    return calloc(count, size);
+#endif
+}
+
+static void *reader_large_malloc(size_t size) {
+#ifdef ESP_PLATFORM
+    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    return malloc(size);
+#endif
+}
+
+static void reader_large_free(void *memory) {
+#ifdef ESP_PLATFORM
+    heap_caps_free(memory);
+#else
+    free(memory);
+#endif
+}
+
+static int ensure_slots(void) {
+    if (slots != NULL) return 0;
+    slots = reader_large_calloc(APP_BOOK_COUNT, sizeof(*slots));
+    return slots != NULL ? 0 : -1;
+}
+
+void reader_library_set_progress_callback(reader_library_progress_callback_t callback,
+                                          void *context) {
+    progress_callback = callback;
+    progress_context = context;
+}
+
+static void report_index_progress(reader_book_slot_t *slot, int percent) {
+    int book_index;
+    if (progress_callback == NULL || slot == NULL || slots == NULL) return;
+    book_index = (int)(slot - slots);
+    progress_callback(book_index, percent, progress_context);
+}
 
 static int has_txt_extension(const char *name) {
     size_t len;
@@ -174,7 +234,9 @@ static void add_chapter(reader_book_slot_t *slot, const char *line, int page) {
     slot->chapter_count++;
 }
 
-static int index_book(reader_book_slot_t *slot) {
+static int index_book_with_layout(reader_book_slot_t *slot,
+                                  const reader_layout_t *active_layout,
+                                  int page_limit, int report_progress) {
     FILE *file = fopen(slot->path, "rb");
     struct stat info;
     char line[READER_CHAPTER_TITLE_MAX] = {0};
@@ -182,14 +244,27 @@ static int index_book(reader_book_slot_t *slot) {
     int line_page = 0;
     int page = 0;
     int line_number = 0;
-    int line_width = layout.indent_enabled ? layout.font_size * 2 : 0;
-    int max_lines = layout.line_height > 0 ? layout.content_height / layout.line_height : 1;
+    int line_width = active_layout->indent_enabled ? active_layout->font_size * 2 : 0;
+    int max_lines = active_layout->line_height > 0
+                        ? active_layout->content_height / active_layout->line_height : 1;
+    long next_progress_offset;
+    int next_progress_percent = 20;
     long page_start = 0;
     long byte_offset = 0;
     if (file == NULL || stat(slot->path, &info) != 0) {
         if (file != NULL) fclose(file);
         return -1;
     }
+    slot->page_count = 0;
+    slot->chapter_count = 0;
+    slot->truncated = 0;
+    slot->layout_valid = 0;
+    memset(slot->page_offsets, 0, sizeof(slot->page_offsets));
+    memset(slot->chapter_titles, 0, sizeof(slot->chapter_titles));
+    memset(slot->chapter_pages, 0, sizeof(slot->chapter_pages));
+    next_progress_offset = info.st_size > 0 ? info.st_size / 5 : 1;
+    if (next_progress_offset < 1) next_progress_offset = 1;
+    if (report_progress) report_index_progress(slot, 0);
     if (max_lines < 1) max_lines = 1;
     {
         unsigned char bom[3];
@@ -202,7 +277,8 @@ static int index_book(reader_book_slot_t *slot) {
         }
     }
     slot->page_offsets[0] = page_start;
-    while (page < READER_MAX_PAGES) {
+    if (page_limit < 1 || page_limit > READER_MAX_PAGES) page_limit = READER_MAX_PAGES;
+    while (page < page_limit) {
         long character_offset = byte_offset;
         char bytes[5];
         uint32_t cp;
@@ -210,6 +286,12 @@ static int index_book(reader_book_slot_t *slot) {
         int advance;
         if (byte_count == 0) break;
         byte_offset += byte_count;
+        if (byte_offset >= next_progress_offset && next_progress_percent < 100) {
+            if (report_progress) report_index_progress(slot, next_progress_percent);
+            else background_progress = next_progress_percent;
+            next_progress_percent += 20;
+            next_progress_offset = info.st_size * next_progress_percent / 100;
+        }
         if (cp == '\f') {
             add_chapter(slot, line, line_page);
             line_len = 0;
@@ -217,7 +299,7 @@ static int index_book(reader_book_slot_t *slot) {
             slot->page_offsets[page] = byte_offset;
             page_start = byte_offset;
             line_number = 0;
-            line_width = layout.indent_enabled ? layout.font_size * 2 : 0;
+            line_width = active_layout->indent_enabled ? active_layout->font_size * 2 : 0;
             line_page = page;
             continue;
         }
@@ -227,7 +309,7 @@ static int index_book(reader_book_slot_t *slot) {
             add_chapter(slot, line, line_page);
             line_len = 0;
             line_number++;
-            line_width = layout.indent_enabled ? layout.font_size * 2 : 0;
+            line_width = active_layout->indent_enabled ? active_layout->font_size * 2 : 0;
             if (line_number >= max_lines) {
                 page++;
                 slot->page_offsets[page] = byte_offset;
@@ -237,9 +319,10 @@ static int index_book(reader_book_slot_t *slot) {
             line_page = page;
             continue;
         }
-        advance = font_measure_text_family(layout.font_size, layout.font_family, bytes);
-        if (layout.bold_enabled) advance++;
-        if (line_width > 0 && line_width + advance > layout.content_width) {
+        advance = font_measure_text_family(active_layout->font_size,
+                                           active_layout->font_family, bytes);
+        if (active_layout->bold_enabled) advance++;
+        if (line_width > 0 && line_width + advance > active_layout->content_width) {
             line_number++;
             line_width = 0;
             if (line_number >= max_lines) {
@@ -278,15 +361,27 @@ static int index_book(reader_book_slot_t *slot) {
         slot->chapter_pages[0] = 0;
         slot->chapter_count = 1;
     }
+    slot->layout_valid = page > 0;
+    slot->layout_complete = byte_offset >= info.st_size || page >= READER_MAX_PAGES;
+    if (report_progress) report_index_progress(slot, 100);
+    else background_progress = 100;
     return page > 0 ? 0 : -1;
+}
+
+static int index_book(reader_book_slot_t *slot) {
+    return index_book_with_layout(slot, &layout, READER_MAX_PAGES, 1);
+}
+
+static int index_book_initial(reader_book_slot_t *slot) {
+    return index_book_with_layout(slot, &layout, READER_INITIAL_READY_PAGES, 1);
 }
 
 static void clear_slot(reader_book_slot_t *slot) { memset(slot, 0, sizeof(*slot)); }
 
-static int load_slot(int book_index, const char *path) {
+static int load_slot_mode(int book_index, const char *path, int initial_only) {
     reader_book_slot_t *slot;
     struct stat info;
-    if (book_index < 0 || book_index >= APP_BOOK_COUNT || path == NULL ||
+    if (ensure_slots() != 0 || book_index < 0 || book_index >= APP_BOOK_COUNT || path == NULL ||
         !has_txt_extension(path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) return -1;
     slot = &slots[book_index];
     clear_slot(slot);
@@ -302,9 +397,21 @@ static int load_slot(int book_index, const char *path) {
     slot->info.size_label = slot->size_label;
     slot->info.file_type = slot->file_type;
     slot->info.chapter_title = slot->title;
-    if (index_book(slot) != 0) { clear_slot(slot); return -1; }
+    if ((initial_only ? index_book_initial(slot) : index_book(slot)) != 0) {
+        clear_slot(slot);
+        return -1;
+    }
     slot->loaded = 1;
+    slot->layout_valid = 1;
     return 0;
+}
+
+static int load_slot(int book_index, const char *path) {
+    return load_slot_mode(book_index, path, 0);
+}
+
+static int load_slot_initial(int book_index, const char *path) {
+    return load_slot_mode(book_index, path, 1);
 }
 
 static int cache_path(char *dest, size_t dest_size, const char *directory,
@@ -350,21 +457,21 @@ static reader_cache_entry_t *load_cache_entries(const char *directory, int *entr
         fclose(file);
         return NULL;
     }
-    entries = calloc(header.entry_count, sizeof(*entries));
+    entries = reader_large_calloc(header.entry_count, sizeof(*entries));
     if (entries == NULL) {
         fclose(file);
         return NULL;
     }
     if (header.entry_count > 0 &&
         fread(entries, sizeof(*entries), header.entry_count, file) != header.entry_count) {
-        free(entries);
+        reader_large_free(entries);
         fclose(file);
         return NULL;
     }
     fclose(file);
     if (cache_checksum_update(2166136261u, entries,
                               header.entry_count * sizeof(*entries)) != header.checksum) {
-        free(entries);
+        reader_large_free(entries);
         return NULL;
     }
     *entry_count = (int)header.entry_count;
@@ -387,7 +494,7 @@ static int restore_cached_slot(int book_index, const char *path,
     }
     if (entry == NULL || entry->file_size != (int64_t)info.st_size ||
         entry->modified_time != (int64_t)info.st_mtime ||
-        entry->page_count <= 0 || entry->page_count > READER_MAX_PAGES ||
+        !entry->layout_valid || entry->page_count <= 0 || entry->page_count > READER_MAX_PAGES ||
         entry->chapter_count <= 0 || entry->chapter_count > READER_MAX_CHAPTERS) return -1;
     for (int i = 0; i <= entry->page_count; i++) {
         if (entry->page_offsets[i] > (uint64_t)info.st_size ||
@@ -410,6 +517,8 @@ static int restore_cached_slot(int book_index, const char *path,
     slot->page_count = entry->page_count;
     slot->chapter_count = entry->chapter_count;
     slot->truncated = entry->truncated;
+    slot->layout_valid = 1;
+    slot->layout_complete = entry->layout_complete ? 1 : 0;
     for (int i = 0; i <= slot->page_count; i++) {
         slot->page_offsets[i] = (long)entry->page_offsets[i];
     }
@@ -421,6 +530,7 @@ static int restore_cached_slot(int book_index, const char *path,
     slot->info.file_type = slot->file_type;
     slot->info.chapter_title = slot->chapter_titles[0];
     slot->loaded = 1;
+    slot->layout_valid = 1;
     return 0;
 }
 
@@ -440,11 +550,11 @@ static int save_cache(const char *directory) {
     memcpy(header.magic, magic, sizeof(magic));
     header.layout = layout;
     header.entry_count = (uint32_t)book_count;
-    entry = calloc(1, sizeof(*entry));
+    entry = reader_large_calloc(1, sizeof(*entry));
     if (entry == NULL) return -1;
     file = fopen(temp_path, "wb");
     if (file == NULL) {
-        free(entry);
+        reader_large_free(entry);
         return -1;
     }
     if (fwrite(&header, sizeof(header), 1, file) != 1) goto fail;
@@ -460,6 +570,8 @@ static int save_cache(const char *directory) {
         entry->page_count = slot->page_count;
         entry->chapter_count = slot->chapter_count;
         entry->truncated = slot->truncated;
+        entry->layout_valid = slot->layout_valid;
+        entry->layout_complete = slot->layout_complete;
         for (int page = 0; page <= slot->page_count; page++) {
             entry->page_offsets[page] = (uint32_t)slot->page_offsets[page];
         }
@@ -470,11 +582,11 @@ static int save_cache(const char *directory) {
     }
     if (fseek(file, 0, SEEK_SET) != 0 || fwrite(&header, sizeof(header), 1, file) != 1) goto fail;
     if (fclose(file) != 0) {
-        free(entry);
+        reader_large_free(entry);
         remove(temp_path);
         return -1;
     }
-    free(entry);
+    reader_large_free(entry);
     remove(backup_path);
     if (rename(path, backup_path) != 0) remove(path);
     if (rename(temp_path, path) != 0) {
@@ -487,12 +599,16 @@ static int save_cache(const char *directory) {
 
 fail:
     fclose(file);
-    free(entry);
+    reader_large_free(entry);
     remove(temp_path);
     return -1;
 }
 
-static void clear_library(void) { memset(slots, 0, sizeof(slots)); }
+static int clear_library(void) {
+    if (ensure_slots() != 0) return -1;
+    memset(slots, 0, sizeof(*slots) * APP_BOOK_COUNT);
+    return 0;
+}
 
 static void insert_sorted_path(char paths[][READER_BOOK_PATH_MAX], int *count, const char *path) {
     int pos;
@@ -521,8 +637,19 @@ static int collect_txt_paths(const char *directory, char paths[][READER_BOOK_PAT
     return count;
 }
 
+int reader_library_count_directory(const char *directory) {
+    char (*paths)[READER_BOOK_PATH_MAX] =
+        reader_large_calloc(APP_BOOK_COUNT, READER_BOOK_PATH_MAX);
+    int count;
+    if (paths == NULL) return 0;
+    count = collect_txt_paths(directory, paths);
+    reader_large_free(paths);
+    return count;
+}
+
 int reader_library_book_count(void) {
     int count = 0;
+    if (slots == NULL) return 0;
     while (count < APP_BOOK_COUNT && slots[count].loaded) count++;
     return count;
 }
@@ -549,17 +676,23 @@ int reader_library_load_book_file(int book_index, const char *path) { return loa
 
 int reader_library_open_book_file(int book_index, const char *path) {
     (void)book_index;
-    clear_library();
+    if (clear_library() != 0) return -1;
     return load_slot(0, path);
 }
 
 int reader_library_load_directory(const char *directory) {
-    char paths[APP_BOOK_COUNT][READER_BOOK_PATH_MAX] = {{0}};
-    int count = collect_txt_paths(directory, paths);
+    char (*paths)[READER_BOOK_PATH_MAX] =
+        reader_large_calloc(APP_BOOK_COUNT, READER_BOOK_PATH_MAX);
+    int count;
     int loaded = 0;
     int cache_entry_count = 0;
     reader_cache_entry_t *cache_entries = NULL;
-    clear_library();
+    if (paths == NULL) return 0;
+    count = collect_txt_paths(directory, paths);
+    if (clear_library() != 0) {
+        reader_large_free(paths);
+        return 0;
+    }
     cache_directory[0] = '\0';
     if (cache_is_enabled_for(directory)) {
         snprintf(cache_directory, sizeof(cache_directory), "%s", directory);
@@ -570,13 +703,14 @@ int reader_library_load_directory(const char *directory) {
             printf("reader_library: cache hit %s (%d pages)\n",
                    paths[i], slots[loaded].page_count);
             fflush(stdout);
+            report_index_progress(&slots[loaded], 100);
             loaded++;
             continue;
         }
         printf("reader_library: indexing %s\n", paths[i]);
         fflush(stdout);
-        if (load_slot(loaded, paths[i]) == 0) {
-            printf("reader_library: indexed %s (%d pages)\n",
+        if (load_slot_initial(loaded, paths[i]) == 0) {
+            printf("reader_library: initial pages ready %s (%d pages)\n",
                    paths[i], slots[loaded].page_count);
             fflush(stdout);
             loaded++;
@@ -585,7 +719,7 @@ int reader_library_load_directory(const char *directory) {
             fflush(stdout);
         }
     }
-    free(cache_entries);
+    reader_large_free(cache_entries);
     if (cache_directory[0] != '\0') {
         if (save_cache(cache_directory) == 0) {
             printf("reader_library: index cache updated\n");
@@ -594,6 +728,7 @@ int reader_library_load_directory(const char *directory) {
         }
         fflush(stdout);
     }
+    reader_large_free(paths);
     return loaded;
 }
 
@@ -614,6 +749,104 @@ int reader_library_configure_layout(int font_size, int font_family, int content_
         fflush(stdout);
     }
     return 1;
+}
+
+int reader_library_ensure_book_layout(int book_index) {
+    if (book_index < 0 || book_index >= reader_library_book_count()) return -1;
+    if (slots[book_index].layout_valid) return 0;
+    printf("reader_library: updating layout for %s\n", slots[book_index].path);
+    fflush(stdout);
+    if (index_book_initial(&slots[book_index]) != 0) return -1;
+    if (cache_directory[0] != '\0' && save_cache(cache_directory) != 0) {
+        printf("reader_library: failed to update index cache after lazy pagination\n");
+        fflush(stdout);
+    }
+    return 1;
+}
+
+int reader_library_book_layout_complete(int book_index) {
+    return book_index >= 0 && book_index < reader_library_book_count()
+               ? slots[book_index].layout_complete : 1;
+}
+
+static void fix_slot_info_pointers(reader_book_slot_t *slot) {
+    slot->info.title = slot->title;
+    slot->info.author = slot->author;
+    slot->info.size_label = slot->size_label;
+    slot->info.file_type = slot->file_type;
+    slot->info.chapter_title = slot->chapter_titles[0];
+}
+
+int reader_library_build_book_layout_background(int book_index) {
+    reader_book_slot_t *result;
+    reader_layout_t result_layout;
+    uint32_t result_id;
+    if (book_index < 0 || book_index >= reader_library_book_count() ||
+        slots[book_index].layout_complete || background_result_ready) return 0;
+    result = reader_large_malloc(sizeof(*result));
+    if (result == NULL) return -1;
+    *result = slots[book_index];
+    result_layout = layout;
+    result_id = slots[book_index].id;
+    background_progress = 0;
+    if (index_book_with_layout(result, &result_layout, READER_MAX_PAGES, 0) != 0) {
+        reader_large_free(result);
+        return -1;
+    }
+    background_result_layout = result_layout;
+    background_result_book_id = result_id;
+    background_result_book_index = book_index;
+    background_result = result;
+    background_result_ready = 1;
+    return 1;
+}
+
+int reader_library_background_progress(void) {
+    return background_progress;
+}
+
+int reader_library_commit_background_layout(int *book_index) {
+    reader_book_slot_t *result;
+    int index;
+    if (!background_result_ready) return 0;
+    result = background_result;
+    index = background_result_book_index;
+    background_result_ready = 0;
+    background_result = NULL;
+    background_result_book_index = -1;
+    if (result == NULL || index < 0 || index >= reader_library_book_count() ||
+        slots[index].id != background_result_book_id ||
+        memcmp(&layout, &background_result_layout, sizeof(layout)) != 0) {
+        reader_large_free(result);
+        return -1;
+    }
+    slots[index] = *result;
+    fix_slot_info_pointers(&slots[index]);
+    reader_large_free(result);
+    if (book_index != NULL) *book_index = index;
+    if (cache_directory[0] != '\0' && save_cache(cache_directory) != 0) {
+        printf("reader_library: failed to save completed background index\n");
+        fflush(stdout);
+    }
+    return 1;
+}
+
+int reader_library_configure_layout_for_book(int font_size, int font_family, int content_width,
+                                             int content_height, int line_height,
+                                             int indent_enabled, int bold_enabled,
+                                             int book_index) {
+    reader_layout_t next = {font_size, font_family, content_width, content_height, line_height,
+                            indent_enabled ? 1 : 0, bold_enabled ? 1 : 0};
+    int changed = memcmp(&layout, &next, sizeof(layout)) != 0;
+    if (changed) {
+        layout = next;
+        for (int i = 0; i < reader_library_book_count(); i++) {
+            slots[i].layout_valid = 0;
+            slots[i].layout_complete = 0;
+        }
+    }
+    if (reader_library_ensure_book_layout(book_index) < 0) return -1;
+    return changed ? 1 : 0;
 }
 
 int reader_library_is_truncated(int book_index) {

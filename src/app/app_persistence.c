@@ -87,6 +87,8 @@ void app_persistence_capture(const app_state_t *app, app_persisted_state_t *snap
     }
     snapshot->reader_font_index = app->reader_font_index;
     snapshot->system_font_index = app->system_font_index;
+    snprintf(snapshot->system_font_name, sizeof(snapshot->system_font_name), "%s",
+             font_manager_family_name(app->system_font_index));
     snapshot->font_size_index = app->font_size_index;
     snapshot->line_spacing_index = app->line_spacing_index;
     snapshot->reader_margin_index = app->reader_margin_index;
@@ -97,6 +99,9 @@ void app_persistence_capture(const app_state_t *app, app_persisted_state_t *snap
     snapshot->wifi_connected = app->wifi_connected;
     snapshot->weather_city_index = app->weather_city_index;
     snapshot->power_saving_enabled = app->power_saving_enabled;
+    snapshot->bookshelf_layout = app->bookshelf_layout;
+    snapshot->bluetooth_enabled = app->bluetooth_enabled;
+    snapshot->dictionary_enabled = app->dictionary_enabled;
 }
 
 int app_persistence_apply(app_state_t *app, const app_persisted_state_t *snapshot) {
@@ -106,8 +111,11 @@ int app_persistence_apply(app_state_t *app, const app_persisted_state_t *snapsho
 
     app->reader_font_index = clamp_int(snapshot->reader_font_index, 0,
                                        font_manager_family_count() - 1);
-    app->system_font_index = clamp_int(snapshot->system_font_index, 0,
-                                       font_manager_family_count() - 1);
+    app->system_font_index = font_manager_family_index(snapshot->system_font_name);
+    if (app->system_font_index < 0) {
+        app->system_font_index = clamp_int(snapshot->system_font_index, 0,
+                                           font_manager_family_count() - 1);
+    }
     font_manager_set_system_family(app->system_font_index);
     app->font_size_index = clamp_int(snapshot->font_size_index, 0, APP_PERSISTENCE_FONT_COUNT - 1);
     app->line_spacing_index = clamp_int(snapshot->line_spacing_index, 0, APP_PERSISTENCE_LINE_SPACING_COUNT - 1);
@@ -119,6 +127,9 @@ int app_persistence_apply(app_state_t *app, const app_persisted_state_t *snapsho
     app->wifi_connected = normalize_bool(snapshot->wifi_connected);
     app->weather_city_index = clamp_int(snapshot->weather_city_index, 0, APP_PERSISTENCE_CITY_COUNT - 1);
     app->power_saving_enabled = normalize_bool(snapshot->power_saving_enabled);
+    app->bookshelf_layout = clamp_int(snapshot->bookshelf_layout, 0, 1);
+    app->bluetooth_enabled = normalize_bool(snapshot->bluetooth_enabled);
+    app->dictionary_enabled = normalize_bool(snapshot->dictionary_enabled);
     app_sync_reader_library(app);
     for (int i = 0; i < APP_BOOK_COUNT; i++) {
         int saved = -1;
@@ -209,6 +220,33 @@ int app_persistence_encode(const app_persisted_state_t *snapshot, char *buffer, 
             buffer[0] = '\0';
         }
         return -1;
+    }
+    if (APP_BOOK_COUNT > 3) {
+        int extra = snprintf(buffer + written, buffer_size - (size_t)written,
+                             "ids_extra=%08" PRIx32 ",%08" PRIx32 ",%08" PRIx32
+                             ",%08" PRIx32 ",%08" PRIx32 ",%08" PRIx32 "\n"
+                             "pages_extra=%d,%d,%d,%d,%d,%d\n"
+                             "bookmarks_extra=%d,%d,%d,%d,%d,%d\n"
+                             "bookshelf_layout=%d\n"
+                             "system_font_name=%s\n"
+                             "bluetooth=%d\n"
+                             "dictionary=%d\n",
+                             snapshot->book_ids[3], snapshot->book_ids[4], snapshot->book_ids[5],
+                             snapshot->book_ids[6], snapshot->book_ids[7], snapshot->book_ids[8],
+                             snapshot->book_current_pages[3], snapshot->book_current_pages[4],
+                             snapshot->book_current_pages[5], snapshot->book_current_pages[6],
+                             snapshot->book_current_pages[7], snapshot->book_current_pages[8],
+                             snapshot->book_bookmark_pages[3], snapshot->book_bookmark_pages[4],
+                             snapshot->book_bookmark_pages[5], snapshot->book_bookmark_pages[6],
+                             snapshot->book_bookmark_pages[7], snapshot->book_bookmark_pages[8],
+                             snapshot->bookshelf_layout,
+                             snapshot->system_font_name,
+                             snapshot->bluetooth_enabled,
+                             snapshot->dictionary_enabled);
+        if (extra < 0 || (size_t)extra >= buffer_size - (size_t)written) {
+            buffer[0] = '\0';
+            return -1;
+        }
     }
     return 0;
 }
@@ -319,6 +357,9 @@ int app_persistence_decode(const char *buffer, app_persisted_state_t *snapshot) 
         }
     }
 parsed_ok:
+    for (int i = 3; i < APP_BOOK_COUNT; i++) {
+        parsed.book_bookmark_pages[i] = -1;
+    }
     {
         int extra = 0;
         int system_font = 0;
@@ -327,9 +368,63 @@ parsed_ok:
             consumed += extra;
         }
     }
+    {
+        int extra = 0;
+        int extra_matched = sscanf(buffer + consumed,
+                         "ids_extra=%" SCNx32 ",%" SCNx32 ",%" SCNx32
+                         ",%" SCNx32 ",%" SCNx32 ",%" SCNx32 "\n"
+                         "pages_extra=%d,%d,%d,%d,%d,%d\n"
+                         "bookmarks_extra=%d,%d,%d,%d,%d,%d\n%n",
+                         &parsed.book_ids[3], &parsed.book_ids[4], &parsed.book_ids[5],
+                         &parsed.book_ids[6], &parsed.book_ids[7], &parsed.book_ids[8],
+                         &parsed.book_current_pages[3], &parsed.book_current_pages[4],
+                         &parsed.book_current_pages[5], &parsed.book_current_pages[6],
+                         &parsed.book_current_pages[7], &parsed.book_current_pages[8],
+                         &parsed.book_bookmark_pages[3], &parsed.book_bookmark_pages[4],
+                         &parsed.book_bookmark_pages[5], &parsed.book_bookmark_pages[6],
+                         &parsed.book_bookmark_pages[7], &parsed.book_bookmark_pages[8],
+                         &extra);
+        if (extra_matched == 18) {
+            consumed += extra;
+        }
+    }
+    {
+        int extra = 0;
+        if (sscanf(buffer + consumed, "bookshelf_layout=%d\n%n",
+                   &parsed.bookshelf_layout, &extra) == 1) {
+            consumed += extra;
+        }
+    }
+    {
+        int extra = 0;
+        if (sscanf(buffer + consumed, "system_font_name=%63[^\n]\n%n",
+                   parsed.system_font_name, &extra) == 1) {
+            consumed += extra;
+        }
+    }
+    {
+        int extra = 0;
+        if (sscanf(buffer + consumed, "bluetooth=%d\n%n",
+                   &parsed.bluetooth_enabled, &extra) == 1) {
+            consumed += extra;
+        }
+    }
+    {
+        int extra = 0;
+        if (sscanf(buffer + consumed, "dictionary=%d\n%n",
+                   &parsed.dictionary_enabled, &extra) == 1) {
+            consumed += extra;
+        }
+    }
     if (parsed.version == 1) {
         parsed.reader_margin_index = 1;
         parsed.reader_indent_enabled = 1;
+        parsed.bluetooth_enabled = 0;
+        parsed.dictionary_enabled = 1;
+        parsed.version = APP_PERSISTENCE_VERSION;
+    } else if (parsed.version == 2) {
+        parsed.bluetooth_enabled = 0;
+        parsed.dictionary_enabled = 1;
         parsed.version = APP_PERSISTENCE_VERSION;
     } else if (parsed.version != APP_PERSISTENCE_VERSION) {
         return -1;

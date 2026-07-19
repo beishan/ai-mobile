@@ -105,7 +105,19 @@
 #define ESP_BUTTON_LONG_PRESS_MS 1200  /* POWER 长按判定时间 */
 
 /* ----------------------------------------------------------------
- * 模块五：共享 SPI 与 SSD1677 时序
+ * 模块五：可选电池电压检测
+ * ----------------------------------------------------------------
+ * 当前硬件接线表没有电池采样电路，因此默认禁用并在状态栏显示“--”。
+ * 启用时必须使用电阻分压，禁止把高于 3.3V 的电池直接接入 GPIO。
+ * 例如上下阻值相同的 1:1 分压：GPIO=1、NUMERATOR=2、DENOMINATOR=1。 */
+#define ESP_BATTERY_ADC_GPIO -1
+#define ESP_BATTERY_DIVIDER_NUMERATOR 2
+#define ESP_BATTERY_DIVIDER_DENOMINATOR 1
+#define ESP_BATTERY_EMPTY_MV 3300
+#define ESP_BATTERY_FULL_MV 4200
+
+/* ----------------------------------------------------------------
+ * 模块六：共享 SPI 与 SSD1677 时序
  * ----------------------------------------------------------------
  * SPI2_HOST 同时服务墨水屏和 SD 卡；设备通过各自 CS 避免总线冲突。
  */
@@ -114,7 +126,6 @@
 #define ESP_EPD_RESET_LOW_MS 20         /* RST 保持低电平时间 */
 #define ESP_EPD_RESET_HIGH_MS 200       /* RST 拉高后的稳定等待 */
 #define ESP_EPD_BUSY_TIMEOUT_MS 60000   /* 全刷最长等待：60 秒 */
-#define ESP_EPD_PARTIAL_REFRESH_LIMIT 12 /* 连续局刷到达阈值后自动全刷；设为 0 可禁用 */
 #define ESP_EPD_PARTIAL_REFRESH_LIMIT 12 /* 连续局刷到达阈值后自动全刷；设为 0 可禁用 */
 
 /* 仅用于启动日志显示；实际供电必须接开发板 3V3 和 GND。 */

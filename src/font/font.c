@@ -827,6 +827,15 @@ const char *font_manager_family_name(int family_index) {
     return "内置字体";
 }
 
+int font_manager_family_index(const char *family_name) {
+    int count = font_manager_family_count();
+    if (family_name == NULL || family_name[0] == '\0') return -1;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(font_manager_family_name(i), family_name) == 0) return i;
+    }
+    return -1;
+}
+
 const external_font_t *font_manager_get_family(int family_index, int size) {
     const char *family;
     const external_font_t *best = NULL;

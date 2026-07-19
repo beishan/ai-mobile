@@ -16,6 +16,11 @@ idf_component_register(
         "platform/esp_input.c"
         "platform/esp_sd.c"
         "platform/esp_time_sync.c"
+        "platform/esp_weather.c"
+        "platform/esp_battery.c"
+        "platform/esp_config_backup.c"
+        "platform/esp_web_admin.c"
+        "web/admin_html.S"
     INCLUDE_DIRS
         "."
         "../assets"
@@ -26,7 +31,12 @@ idf_component_register(
         freertos
         esp_event
         esp_netif
+        esp_rom
         esp_wifi
+        esp_http_server
+        esp_http_client
+        esp_adc
+        mbedtls
         log
         lwip
         nvs_flash

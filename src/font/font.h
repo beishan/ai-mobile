@@ -91,6 +91,7 @@ const external_font_t *font_manager_get(int size);
 const external_font_t *font_manager_get_family(int family_index, int size);
 int font_manager_family_count(void);
 const char *font_manager_family_name(int family_index);
+int font_manager_family_index(const char *family_name);
 void font_manager_set_system_family(int family_index);
 int font_manager_system_family(void);
 
