@@ -27,6 +27,17 @@ static int has_txt_extension(const char *name) {
            (name[3] == 't' || name[3] == 'T');
 }
 
+static int has_epub_extension(const char *name) {
+    size_t length;
+    if (name == NULL || (length = strlen(name)) < 5) return 0;
+    name += length - 5;
+    return name[0] == '.' &&
+           (name[1] == 'e' || name[1] == 'E') &&
+           (name[2] == 'p' || name[2] == 'P') &&
+           (name[3] == 'u' || name[3] == 'U') &&
+           (name[4] == 'b' || name[4] == 'B');
+}
+
 static int join_path(const char *directory, const char *name, char *path, size_t path_size) {
     int written;
     if (directory == NULL || name == NULL || path == NULL || path_size == 0) {
@@ -71,6 +82,7 @@ int file_browser_refresh(void) {
         entry->size = S_ISREG(info.st_mode) && info.st_size > 0 ? (size_t)info.st_size : 0;
         entry->is_directory = S_ISDIR(info.st_mode);
         entry->is_text = !entry->is_directory && has_txt_extension(entry->name);
+        entry->is_epub = !entry->is_directory && has_epub_extension(entry->name);
     }
     closedir(directory);
     qsort(entries, (size_t)entry_count, sizeof(entries[0]), compare_entries);

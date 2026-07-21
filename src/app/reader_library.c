@@ -1,6 +1,7 @@
 #include "app/reader_library.h"
 
 #include "app/app_state.h"
+#include "app/epub_reader.h"
 #include "font/font.h"
 
 #include <ctype.h>
@@ -20,7 +21,7 @@
 #define READER_BOOK_PATH_MAX 512
 #define READER_META_TEXT_MAX 160
 #define READER_CHAPTER_TITLE_MAX 96
-#define READER_CACHE_VERSION 2
+#define READER_CACHE_VERSION 3
 #define READER_CACHE_FILE_NAME ".ai_mobile_index.bin"
 #define READER_CACHE_TEMP_NAME ".ai_mobile_index.tmp"
 #define READER_CACHE_BACKUP_NAME ".ai_mobile_index.bak"
@@ -29,8 +30,9 @@
 typedef struct {
     reader_book_t info;
     char path[READER_BOOK_PATH_MAX];
+    char content_path[READER_BOOK_PATH_MAX];
     char title[READER_META_TEXT_MAX];
-    char author[24];
+    char author[64];
     char size_label[24];
     char file_type[8];
     long page_offsets[READER_MAX_PAGES + 1];
@@ -68,6 +70,9 @@ typedef struct {
     int64_t file_size;
     int64_t modified_time;
     uint32_t id;
+    char title[READER_META_TEXT_MAX];
+    char author[64];
+    char file_type[8];
     int32_t page_count;
     int32_t chapter_count;
     int32_t truncated;
@@ -144,6 +149,21 @@ static int has_txt_extension(const char *name) {
            (name[len - 1] == 't' || name[len - 1] == 'T');
 }
 
+static int has_epub_extension(const char *name) {
+    size_t len;
+    if (name == NULL) return 0;
+    len = strlen(name);
+    return len > 5 && name[len - 5] == '.' &&
+           (name[len - 4] == 'e' || name[len - 4] == 'E') &&
+           (name[len - 3] == 'p' || name[len - 3] == 'P') &&
+           (name[len - 2] == 'u' || name[len - 2] == 'U') &&
+           (name[len - 1] == 'b' || name[len - 1] == 'B');
+}
+
+static int has_book_extension(const char *name) {
+    return has_txt_extension(name) || has_epub_extension(name);
+}
+
 static const char *path_basename(const char *path) {
     const char *base = path == NULL ? "" : path;
     for (const char *p = base; *p != '\0'; p++) {
@@ -156,6 +176,7 @@ static void copy_title(char *dest, size_t dest_size, const char *path) {
     const char *base = path_basename(path);
     size_t len = strlen(base);
     if (len > 4 && has_txt_extension(base)) len -= 4;
+    else if (len > 5 && has_epub_extension(base)) len -= 5;
     if (len >= dest_size) len = dest_size - 1;
     memcpy(dest, base, len);
     dest[len] = '\0';
@@ -173,6 +194,19 @@ static uint32_t hash_book_identity(const char *path, long size) {
         hash *= 16777619u;
     }
     return hash != 0 ? hash : 1u;
+}
+
+static int epub_content_path(uint32_t id, char *path, size_t path_size) {
+#ifdef ESP_PLATFORM
+    const char *root = "/sdcard/.ai_epub_cache";
+    (void)mkdir(root, 0777);
+#else
+    const char *root = "out/.epub_cache";
+    (void)mkdir("out", 0777);
+    (void)mkdir(root, 0777);
+#endif
+    return snprintf(path, path_size, "%s/%08x.txt", root, (unsigned int)id) < (int)path_size
+               ? 0 : -1;
 }
 
 static int read_utf8_character(FILE *file, char bytes[5], uint32_t *codepoint) {
@@ -237,7 +271,7 @@ static void add_chapter(reader_book_slot_t *slot, const char *line, int page) {
 static int index_book_with_layout(reader_book_slot_t *slot,
                                   const reader_layout_t *active_layout,
                                   int page_limit, int report_progress) {
-    FILE *file = fopen(slot->path, "rb");
+    FILE *file = fopen(slot->content_path, "rb");
     struct stat info;
     char line[READER_CHAPTER_TITLE_MAX] = {0};
     int line_len = 0;
@@ -251,7 +285,7 @@ static int index_book_with_layout(reader_book_slot_t *slot,
     int next_progress_percent = 20;
     long page_start = 0;
     long byte_offset = 0;
-    if (file == NULL || stat(slot->path, &info) != 0) {
+    if (file == NULL || stat(slot->content_path, &info) != 0) {
         if (file != NULL) fclose(file);
         return -1;
     }
@@ -382,16 +416,29 @@ static int load_slot_mode(int book_index, const char *path, int initial_only) {
     reader_book_slot_t *slot;
     struct stat info;
     if (ensure_slots() != 0 || book_index < 0 || book_index >= APP_BOOK_COUNT || path == NULL ||
-        !has_txt_extension(path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) return -1;
+        !has_book_extension(path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) return -1;
     slot = &slots[book_index];
     clear_slot(slot);
     if (snprintf(slot->path, sizeof(slot->path), "%s", path) >= (int)sizeof(slot->path)) return -1;
+    slot->id = hash_book_identity(slot->path, (long)info.st_size);
     copy_title(slot->title, sizeof(slot->title), path);
     snprintf(slot->author, sizeof(slot->author), "SD 卡文件");
     if (info.st_size >= 1024 * 1024) snprintf(slot->size_label, sizeof(slot->size_label), "%.1f MB", (double)info.st_size / (1024.0 * 1024.0));
     else snprintf(slot->size_label, sizeof(slot->size_label), "%u KB", (unsigned int)((info.st_size + 1023) / 1024));
-    snprintf(slot->file_type, sizeof(slot->file_type), "TXT");
-    slot->id = hash_book_identity(slot->path, (long)info.st_size);
+    if (has_epub_extension(path)) {
+        epub_metadata_t metadata;
+        if (epub_content_path(slot->id, slot->content_path, sizeof(slot->content_path)) != 0 ||
+            epub_extract_text(path, slot->content_path, &metadata) != 0) {
+            clear_slot(slot);
+            return -1;
+        }
+        if (metadata.title[0] != '\0') snprintf(slot->title, sizeof(slot->title), "%s", metadata.title);
+        if (metadata.author[0] != '\0') snprintf(slot->author, sizeof(slot->author), "%s", metadata.author);
+        snprintf(slot->file_type, sizeof(slot->file_type), "EPUB");
+    } else {
+        snprintf(slot->content_path, sizeof(slot->content_path), "%s", path);
+        snprintf(slot->file_type, sizeof(slot->file_type), "TXT");
+    }
     slot->info.title = slot->title;
     slot->info.author = slot->author;
     slot->info.size_label = slot->size_label;
@@ -481,6 +528,7 @@ static reader_cache_entry_t *load_cache_entries(const char *directory, int *entr
 static int restore_cached_slot(int book_index, const char *path,
                                const reader_cache_entry_t *entries, int entry_count) {
     struct stat info;
+    struct stat content_info;
     reader_book_slot_t *slot;
     const reader_cache_entry_t *entry = NULL;
     if (book_index < 0 || book_index >= APP_BOOK_COUNT || path == NULL ||
@@ -496,15 +544,25 @@ static int restore_cached_slot(int book_index, const char *path,
         entry->modified_time != (int64_t)info.st_mtime ||
         !entry->layout_valid || entry->page_count <= 0 || entry->page_count > READER_MAX_PAGES ||
         entry->chapter_count <= 0 || entry->chapter_count > READER_MAX_CHAPTERS) return -1;
-    for (int i = 0; i <= entry->page_count; i++) {
-        if (entry->page_offsets[i] > (uint64_t)info.st_size ||
-            (i > 0 && entry->page_offsets[i] < entry->page_offsets[i - 1])) return -1;
-    }
     slot = &slots[book_index];
     clear_slot(slot);
     snprintf(slot->path, sizeof(slot->path), "%s", path);
-    copy_title(slot->title, sizeof(slot->title), path);
-    snprintf(slot->author, sizeof(slot->author), "SD card file");
+    slot->id = entry->id;
+    if (has_epub_extension(path)) {
+        if (epub_content_path(slot->id, slot->content_path, sizeof(slot->content_path)) != 0 ||
+            stat(slot->content_path, &content_info) != 0 || content_info.st_size <= 0) return -1;
+    } else {
+        snprintf(slot->content_path, sizeof(slot->content_path), "%s", path);
+        content_info = info;
+    }
+    for (int i = 0; i <= entry->page_count; i++) {
+        if (entry->page_offsets[i] > (uint64_t)content_info.st_size ||
+            (i > 0 && entry->page_offsets[i] < entry->page_offsets[i - 1])) return -1;
+    }
+    if (entry->title[0] != '\0') snprintf(slot->title, sizeof(slot->title), "%s", entry->title);
+    else copy_title(slot->title, sizeof(slot->title), path);
+    if (entry->author[0] != '\0') snprintf(slot->author, sizeof(slot->author), "%s", entry->author);
+    else snprintf(slot->author, sizeof(slot->author), "SD 卡文件");
     if (info.st_size >= 1024 * 1024) {
         snprintf(slot->size_label, sizeof(slot->size_label), "%.1f MB",
                  (double)info.st_size / (1024.0 * 1024.0));
@@ -512,8 +570,9 @@ static int restore_cached_slot(int book_index, const char *path,
         snprintf(slot->size_label, sizeof(slot->size_label), "%u KB",
                  (unsigned int)((info.st_size + 1023) / 1024));
     }
-    snprintf(slot->file_type, sizeof(slot->file_type), "TXT");
-    slot->id = entry->id;
+    snprintf(slot->file_type, sizeof(slot->file_type), "%s",
+             entry->file_type[0] != '\0' ? entry->file_type :
+             (has_epub_extension(path) ? "EPUB" : "TXT"));
     slot->page_count = entry->page_count;
     slot->chapter_count = entry->chapter_count;
     slot->truncated = entry->truncated;
@@ -567,6 +626,9 @@ static int save_cache(const char *directory) {
         entry->file_size = (int64_t)info.st_size;
         entry->modified_time = (int64_t)info.st_mtime;
         entry->id = slot->id;
+        snprintf(entry->title, sizeof(entry->title), "%s", slot->title);
+        snprintf(entry->author, sizeof(entry->author), "%s", slot->author);
+        snprintf(entry->file_type, sizeof(entry->file_type), "%s", slot->file_type);
         entry->page_count = slot->page_count;
         entry->chapter_count = slot->chapter_count;
         entry->truncated = slot->truncated;
@@ -622,14 +684,14 @@ static void insert_sorted_path(char paths[][READER_BOOK_PATH_MAX], int *count, c
     if (*count < APP_BOOK_COUNT) (*count)++;
 }
 
-static int collect_txt_paths(const char *directory, char paths[][READER_BOOK_PATH_MAX]) {
+static int collect_book_paths(const char *directory, char paths[][READER_BOOK_PATH_MAX]) {
     DIR *dir;
     struct dirent *entry;
     int count = 0;
     if (directory == NULL || (dir = opendir(directory)) == NULL) return 0;
     while ((entry = readdir(dir)) != NULL) {
         char path[READER_BOOK_PATH_MAX];
-        if (!has_txt_extension(entry->d_name) ||
+        if (!has_book_extension(entry->d_name) ||
             snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name) >= (int)sizeof(path)) continue;
         insert_sorted_path(paths, &count, path);
     }
@@ -642,7 +704,7 @@ int reader_library_count_directory(const char *directory) {
         reader_large_calloc(APP_BOOK_COUNT, READER_BOOK_PATH_MAX);
     int count;
     if (paths == NULL) return 0;
-    count = collect_txt_paths(directory, paths);
+    count = collect_book_paths(directory, paths);
     reader_large_free(paths);
     return count;
 }
@@ -688,7 +750,7 @@ int reader_library_load_directory(const char *directory) {
     int cache_entry_count = 0;
     reader_cache_entry_t *cache_entries = NULL;
     if (paths == NULL) return 0;
-    count = collect_txt_paths(directory, paths);
+    count = collect_book_paths(directory, paths);
     if (clear_library() != 0) {
         reader_large_free(paths);
         return 0;
@@ -863,7 +925,7 @@ const char *reader_library_page_text(int book_index, int page_index) {
     if (page_index < 0 || page_index >= slot->page_count) return "";
     length = slot->page_offsets[page_index + 1] - slot->page_offsets[page_index];
     if (length <= 0 || length >= READER_PAGE_TEXT_MAX ||
-        (file = fopen(slot->path, "rb")) == NULL ||
+        (file = fopen(slot->content_path, "rb")) == NULL ||
         fseek(file, slot->page_offsets[page_index], SEEK_SET) != 0) {
         if (file != NULL) fclose(file);
         return "";

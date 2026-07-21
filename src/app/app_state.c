@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define HOME_ITEM_COUNT 7
+#define HOME_ITEM_COUNT 6
 #define READER_MENU_COUNT 3
 #define READER_SETTINGS_COUNT 9
 #define WEATHER_CITY_COUNT 3
@@ -35,9 +35,8 @@ static app_page_t page_for_home_selection(int selection) {
             return APP_PAGE_ENGLISH;
         case 5:
             return APP_PAGE_SETTINGS;
-        case 6:
         default:
-            return APP_PAGE_ABOUT;
+            return APP_PAGE_HOME;
     }
 }
 
@@ -329,7 +328,7 @@ static void handle_file_browser(app_state_t *app, app_button_t button) {
         } else if (entry->is_directory) {
             app->file_browser_error = file_browser_enter_directory(app->file_browser_selection) < 0;
             app->file_browser_selection = 0;
-        } else if (entry->is_text) {
+        } else if (entry->is_text || entry->is_epub) {
             char path[FILE_BROWSER_PATH_MAX];
             if (file_browser_entry_path(app->file_browser_selection, path, sizeof(path)) == 0 &&
                 reader_library_open_book_file(0, path) == 0) {

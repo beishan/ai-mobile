@@ -10,7 +10,7 @@ Current scope:
 - Home modules: reading, SD files, weather, calendar, English, settings, and about.
 - Reader-first simulator and firmware with a full-refresh SSD1677 hardware path.
 - SDL and PPM simulators share the same app state and renderer as the ESP32 firmware.
-- Reader book metadata and page text flow through `src/app/reader_library.*`; ESP32 firmware mounts `/sdcard` and loads UTF-8 TXT files from `/sdcard/books` through that boundary.
+- Reader book metadata and page text flow through `src/app/reader_library.*`; ESP32 firmware mounts `/sdcard` and loads UTF-8 TXT or DRM-free EPUB files from `/sdcard/books` through that boundary.
 - Source text supports both explicit form-feed page breaks and automatic UTF-8-safe page splitting.
 
 Obsolete historical plans for the former small-format color-accent simulator have been removed from the current docs tree so new work follows this target.

@@ -6,6 +6,7 @@ idf_component_register(
         "app/app_persistence.c"
         "app/file_browser.c"
         "app/reader_library.c"
+        "app/epub_reader.c"
         "ui/pages.c"
         "ui/icons.c"
         "font/font.c"

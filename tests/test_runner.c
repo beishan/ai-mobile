@@ -324,22 +324,33 @@ static void test_esp_project_targets_ssd1677_bw_panel(void) {
     ASSERT_TRUE(!file_contains("src/platform/epd_frame.h", "red"));
 }
 
-static void test_home_has_file_browser_and_no_game(void) {
+static void test_home_has_six_entries_without_about_or_game(void) {
     app_page_t expected[] = {
         APP_PAGE_BOOKSHELF,
         APP_PAGE_FILE_BROWSER,
         APP_PAGE_WEATHER,
         APP_PAGE_CALENDAR,
         APP_PAGE_ENGLISH,
-        APP_PAGE_SETTINGS,
-        APP_PAGE_ABOUT
+        APP_PAGE_SETTINGS
     };
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 6; i++) {
         app_state_t app;
         app_init(&app);
         app.home_selection = i;
         app_handle_button(&app, APP_BUTTON_HOME);
         ASSERT_EQ_INT(expected[i], app.page);
+    }
+    {
+        app_state_t app;
+        int x;
+        int y;
+        int width;
+        int height;
+        app_init(&app);
+        app_handle_button(&app, APP_BUTTON_UP);
+        ASSERT_EQ_INT(5, app.home_selection);
+        ASSERT_EQ_INT(0, ui_home_tile_bounds(5, &x, &y, &width, &height));
+        ASSERT_EQ_INT(-1, ui_home_tile_bounds(6, &x, &y, &width, &height));
     }
     ASSERT_TRUE(strcmp("unknown", app_page_name((app_page_t)99)) == 0);
 }
@@ -357,7 +368,7 @@ static void test_settings_page_selects_items_with_up_down_buttons(void) {
     ASSERT_EQ_INT(0, app.settings_selection);
     ASSERT_EQ_INT(0, app.settings_scroll);
     app_handle_button(&app, APP_BUTTON_UP);
-    ASSERT_EQ_INT(8, app.settings_selection);
+    ASSERT_EQ_INT(10, app.settings_selection);
     ASSERT_TRUE(app.settings_scroll > 0);
 }
 
@@ -750,26 +761,38 @@ static void test_reader_library_auto_paginates_plain_text_file(void) {
     ASSERT_TRUE((reader_library_page_text(1, 1)[0] & 0xc0) != 0x80);
 }
 
+static void test_reader_library_loads_epub_metadata_and_text(void) {
+    const char *path =
+        "assets/books/realbook/我在北京送快递 (胡安焉) (Z-Library).epub";
+    const reader_book_t *book;
+    ASSERT_EQ_INT(0, reader_library_load_book_file(0, path));
+    book = reader_library_book(0);
+    ASSERT_TRUE(book != NULL);
+    ASSERT_TRUE(strcmp("EPUB", book->file_type) == 0);
+    ASSERT_TRUE(strcmp("我在北京送快递", book->title) == 0);
+    ASSERT_TRUE(strcmp("胡安焉", book->author) == 0);
+    ASSERT_TRUE(reader_library_page_count(0) > 1);
+    ASSERT_TRUE(strstr(reader_library_page_text(0, 0), "Cover") != NULL);
+}
+
 static void test_reader_library_loads_external_real_books(void) {
     app_state_t app;
-    const reader_book_t *first_book;
-    const reader_book_t *second_book;
+    int txt_index = -1;
+    int epub_index = -1;
 
     ASSERT_TRUE(reader_library_load_external_books() >= 2);
-    first_book = reader_library_book(0);
-    second_book = reader_library_book(1);
-    ASSERT_TRUE(first_book != NULL);
-    ASSERT_TRUE(second_book != NULL);
-    ASSERT_TRUE(strstr(first_book->title, "全民转职") != NULL);
-    ASSERT_TRUE(strstr(second_book->title, "混沌天帝诀") != NULL);
-    ASSERT_TRUE(strcmp("TXT", first_book->file_type) == 0);
-    ASSERT_TRUE(strstr(reader_library_source_text(0), "全民转职") != NULL);
-    ASSERT_TRUE(strstr(reader_library_source_text(0), "转职修仙者") != NULL);
-    ASSERT_TRUE(strstr(reader_library_source_text(1), "第1章 背叛") != NULL);
-    ASSERT_TRUE(strstr(reader_library_source_text(1), "楚剑秋") != NULL);
-    ASSERT_TRUE(strstr(reader_library_page_text(0, 0), "笔趣阁789提供下载") != NULL);
-    ASSERT_TRUE(reader_library_page_count(0) >= 2);
-    ASSERT_TRUE(reader_library_page_count(1) >= 2);
+    for (int i = 0; i < reader_library_book_count(); i++) {
+        const reader_book_t *book = reader_library_book(i);
+        if (book != NULL && strcmp(book->file_type, "TXT") == 0 &&
+            strstr(book->title, "全民转职") != NULL) txt_index = i;
+        if (book != NULL && strcmp(book->file_type, "EPUB") == 0) epub_index = i;
+    }
+    ASSERT_TRUE(txt_index >= 0);
+    ASSERT_TRUE(epub_index >= 0);
+    ASSERT_TRUE(strstr(reader_library_source_text(txt_index), "全民转职") != NULL);
+    ASSERT_TRUE(strstr(reader_library_page_text(txt_index, 0), "笔趣阁789提供下载") != NULL);
+    ASSERT_TRUE(reader_library_page_count(txt_index) >= 2);
+    ASSERT_TRUE(reader_library_page_count(epub_index) >= 2);
 
     app_init(&app);
     ASSERT_EQ_INT(reader_library_page_count(0), app.book_pages[0]);
@@ -777,7 +800,7 @@ static void test_reader_library_loads_external_real_books(void) {
     ASSERT_EQ_INT(reader_library_page_count(2), app.book_pages[2]);
 }
 
-static void test_file_browser_lists_directories_and_opens_txt(void) {
+static void test_file_browser_lists_and_opens_supported_books(void) {
     app_state_t app;
     int txt_index = -1;
     ASSERT_TRUE(file_browser_open("assets/books") > 0);
@@ -799,9 +822,19 @@ static void test_file_browser_lists_directories_and_opens_txt(void) {
     app_handle_button(&app, APP_BUTTON_HOME);
     ASSERT_EQ_INT(APP_PAGE_READER, app.page);
     ASSERT_TRUE(reader_library_page_count(0) >= 1);
+
+    ASSERT_TRUE(file_browser_open("assets/books/realbook") > 0);
+    {
+        int epub_index = -1;
+        for (int i = 0; i < file_browser_count(); i++) {
+            const file_browser_entry_t *entry = file_browser_entry(i);
+            if (entry != NULL && entry->is_epub) { epub_index = i; break; }
+        }
+        ASSERT_TRUE(epub_index >= 0);
+    }
 }
 
-static void test_reader_library_loads_txt_directory(void) {
+static void test_reader_library_loads_supported_book_directory(void) {
     ASSERT_TRUE(reader_library_load_directory("assets/books/realbook") >= 2);
     ASSERT_TRUE(reader_library_page_count(0) >= 1);
     ASSERT_TRUE(reader_library_book(0)->file_type != NULL);
@@ -1675,8 +1708,8 @@ int main(void) {
     test_ssd1677_partial_refresh_updates_only_window();
     test_target_documents_reference_ssd1677_and_no_game_module();
     test_esp_project_targets_ssd1677_bw_panel();
-    test_home_has_file_browser_and_no_game();
-    test_file_browser_lists_directories_and_opens_txt();
+    test_home_has_six_entries_without_about_or_game();
+    test_file_browser_lists_and_opens_supported_books();
     test_settings_page_selects_items_with_up_down_buttons();
     test_weather_page_scrolls_while_changing_city();
     test_home_selection_uses_outline_frame_and_larger_icon();
@@ -1697,9 +1730,10 @@ int main(void) {
     test_reader_library_builds_pages_from_source_text();
     test_reader_library_loads_source_text_from_file();
     test_reader_library_auto_paginates_plain_text_file();
+    test_reader_library_loads_epub_metadata_and_text();
     test_bookshelf_reflects_loaded_realbook_metadata();
     test_reader_library_loads_external_real_books();
-    test_reader_library_loads_txt_directory();
+    test_reader_library_loads_supported_book_directory();
     test_entrypoints_load_external_books_on_startup();
     test_app_persistence_round_trips_reader_progress_and_settings();
     test_app_persistence_clamps_restored_values_to_current_limits();

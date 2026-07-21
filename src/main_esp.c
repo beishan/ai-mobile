@@ -694,7 +694,7 @@ void app_main(void) {
                                     tskIDLE_PRIORITY + 1, NULL, 0) == pdPASS) {
             app.reader_library_loading = 1;
             app.reader_library_progress = 0;
-            ESP_LOGI(TAG, "desktop ready; indexing TXT books in background");
+            ESP_LOGI(TAG, "desktop ready; indexing TXT/EPUB books in background");
         } else {
             sd_library_state = SD_LIBRARY_IDLE;
             app.reader_library_loading = 0;
@@ -718,7 +718,7 @@ void app_main(void) {
             if (save_app_configuration(&app, sd_mounted) != 0) {
                 ESP_LOGW(TAG, "failed to persist restored library state");
             }
-            ESP_LOGI(TAG, "background indexing complete: loaded %d TXT book(s) from %s",
+            ESP_LOGI(TAG, "background indexing complete: loaded %d TXT/EPUB book(s) from %s",
                      sd_library_loaded_count, ESP_SD_BOOK_DIRECTORY);
             if (app.page == APP_PAGE_BOOKSHELF) {
                 ui_render_page(fb, &app, &font);

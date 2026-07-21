@@ -12,6 +12,7 @@ typedef struct {
     size_t size;
     int is_directory;
     int is_text;
+    int is_epub;
 } file_browser_entry_t;
 
 int file_browser_open(const char *root_path);

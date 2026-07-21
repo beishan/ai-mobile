@@ -52,10 +52,10 @@ The headless simulator writes the latest 480 x 800 frame to `out/frame.ppm`.
 
 ## Current Modules
 
-- Home: seven app entries, `阅读 / 文件 / 天气 / 日历 / 英语 / 设置 / 关于`.
+- Home: six app entries, `阅读 / 文件 / 天气 / 日历 / 英语 / 设置`.
 - Files: browses `/sdcard`, enters folders, returns to parent folders, and opens selected UTF-8 `.txt` files in the reader.
-- Bookshelf: lists only TXT books indexed from the SD card, with per-book progress and bookmarks.
-- Reader: SD-backed TXT page reader, page turning, reader menu, catalog overlay, bookmark action, font size and line spacing settings.
+- Bookshelf: lists TXT and EPUB books indexed from the SD card, with per-book progress and bookmarks.
+- Reader: SD-backed TXT/EPUB reader with page turning, catalog, bookmarks, font size, and line spacing settings.
 - Persistence: portable snapshot codec for per-book progress, bookmarks, recent book, and reader/settings state; simulators load it from `out/app_state.txt`, and ESP32 firmware stores the same payload in NVS.
 - Back: the dedicated BACK key returns to the parent page; POWER long press saves app state and requests display sleep.
 - Weather: mock city switching, refresh state, WiFi/offline cache behavior.
@@ -93,16 +93,16 @@ Hardware status:
 - `src/platform/ssd1677.c` implements SSD1677 reset-time setup, RAM addressing, full-frame transfer, refresh, BUSY synchronization, power-off, and deep sleep.
 - `src/platform/esp_display.c` connects the SSD1677 command driver to ESP-IDF GPIO/SPI and transfers the 180-degree rotated 48,000-byte frame for the current panel mounting.
 - `src/platform/esp_input.c` scans BACK/POWER/UP/HOME/DOWN in a dedicated 20ms FreeRTOS task, applies 40ms debounce, and queues events while E-Ink refresh blocks the UI loop.
-- `src/platform/esp_sd.c` mounts a FAT-formatted SPI SD card at `/sdcard`; startup loads up to three alphabetically sorted `.txt` files from `/sdcard/books`.
+- `src/platform/esp_sd.c` mounts a FAT-formatted SPI SD card at `/sdcard`; startup indexes alphabetically sorted `.txt` and `.epub` files from `/sdcard/books`.
 - POWER long press is detected after 1200ms and handled by the ESP32 main loop as a display sleep request.
-- `src/app/reader_library.c` indexes the actual SD TXT files used by the bookshelf and reader. It keeps file paths and page offsets (up to 2,048 reader pages per book), then reads the selected page from the SD card when rendering; no built-in book text is compiled into the firmware.
+- `src/app/reader_library.c` indexes SD TXT and EPUB files used by the bookshelf and reader. EPUB package metadata and spine-ordered XHTML are extracted into a hidden SD cache, then the shared paginator keeps page offsets (up to 2,048 reader pages per book).
 - `src/app/app_persistence.c` captures durable app state into a versioned text payload, with simulator file save/load wired through `out/app_state.txt` and ESP32 NVS save/load wired through the `reader/app_state` key.
-- The desktop simulators load TXT files from `assets/books/realbook`; no built-in book-text fallback is provided.
+- The desktop simulators load TXT and EPUB files from `assets/books/realbook`; no built-in book-text fallback is provided.
 - Text sources may use form-feed (`\f`) for explicit page breaks; plain text without page breaks is split automatically on UTF-8-safe boundaries.
 - The 480 x 800 UI framebuffer is allocated from PSRAM instead of the ESP-IDF main-task stack.
 - The SSD1677 driver uses OTP full refresh for page changes and differential partial refresh for all same-page interactions: home and bookshelf selection, file-list navigation, reader turns/menu/catalog/settings, weather, calendar, English cards, settings, and Wi-Fi editing. Directory reloads and page transitions retain full refresh. Real-panel validation is still pending because the current EPD BUSY signal does not become ready.
 - Partial refreshes are counted globally by the display driver. After 12 consecutive successful partial updates, the next partial request is automatically promoted to a full refresh to clear ghosting; adjust `ESP_EPD_PARTIAL_REFRESH_LIMIT` in `esp_board_config.h` if the panel needs a different interval.
-- TXT pagination now follows the selected font size/family, line spacing, margins, indentation, and bold width. Chapter-like lines are indexed for catalog navigation, progress/bookmarks are matched by stable book IDs instead of shelf position, and files exceeding 2,048 laid-out pages show an explicit truncation warning.
+- TXT/EPUB pagination follows the selected font size/family, line spacing, margins, indentation, and bold width. Chapter-like lines are indexed for catalog navigation, progress/bookmarks are matched by stable book IDs instead of shelf position, and files exceeding 2,048 laid-out pages show an explicit truncation warning.
 - Wi-Fi + NTP time sync is ready. Open Settings and press HOME to edit SSID/password on the device, then select “保存并重启校时”. Credentials are stored in NVS; the firmware uses `ntp.aliyun.com`, China Standard Time (`CST-8`), waits up to 12 seconds at boot, and partial-refreshes the status clock every minute.
 
 Current E-Ink wiring:

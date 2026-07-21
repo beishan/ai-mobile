@@ -261,7 +261,7 @@ static void app_tile(gfx_framebuffer_t *fb, const font_t *font, ui_icon_kind_t i
 
 int ui_home_tile_bounds(int index, int *x, int *y, int *width, int *height) {
     const int cols = 3;
-    const int rows = 3;
+    const int rows = 2;
     const int gap = 18;
     const int tile_w = 108;
     const int tile_h = 96;
@@ -274,11 +274,11 @@ int ui_home_tile_bounds(int index, int *x, int *y, int *width, int *height) {
     int col;
     int row;
 
-    if (index < 0 || index >= 7 || x == NULL || y == NULL ||
+    if (index < 0 || index >= 6 || x == NULL || y == NULL ||
         width == NULL || height == NULL) {
         return -1;
     }
-    col = index == 6 ? 1 : index % cols;
+    col = index % cols;
     row = index / cols;
     *x = start_x + col * (tile_w + gap);
     *y = start_y + row * (tile_h + gap);
@@ -288,15 +288,14 @@ int ui_home_tile_bounds(int index, int *x, int *y, int *width, int *height) {
 }
 
 static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
-    const char *items[] = {"阅读", "文件", "天气", "日历", "英语", "设置", "关于"};
+    const char *items[] = {"阅读", "文件", "天气", "日历", "英语", "设置"};
     const ui_icon_kind_t icons[] = {
         UI_ICON_READER,
         UI_ICON_FILES,
         UI_ICON_WEATHER,
         UI_ICON_CALENDAR,
         UI_ICON_ENGLISH,
-        UI_ICON_SETTINGS,
-        UI_ICON_ABOUT
+        UI_ICON_SETTINGS
     };
 
     home_status_bar(fb, font);
@@ -309,8 +308,8 @@ static void render_home(gfx_framebuffer_t *fb, const app_state_t *app, const fon
     const int card_y = BODY_TOP + 8;
     home_info_card(fb, app, card_x, card_y, card_w, card_h);
 
-    /* Seven entries in a 3-column grid; the last entry is centered. */
-    for (int i = 0; i < 7; i++) {
+    /* Six entries in a centered 3-column by 2-row grid. */
+    for (int i = 0; i < 6; i++) {
         int x;
         int y;
         int width;
@@ -438,6 +437,8 @@ static void render_file_browser(gfx_framebuffer_t *fb, const app_state_t *app, c
         font_draw_text_builtin(18, fb, 88, y + 9, name, color);
         if (entry->is_directory) {
             snprintf(detail, sizeof(detail), "目录");
+        } else if (entry->is_epub) {
+            snprintf(detail, sizeof(detail), "EPUB  %u bytes", (unsigned int)entry->size);
         } else if (entry->is_text) {
             snprintf(detail, sizeof(detail), "TXT  %u bytes", (unsigned int)entry->size);
         } else {
@@ -449,7 +450,7 @@ static void render_file_browser(gfx_framebuffer_t *fb, const app_state_t *app, c
     gfx_fill_rect(fb, 0, 752, GFX_WIDTH, 1, GFX_BLACK);
     if (app->file_browser_error == 2) {
         font_draw_text_aligned_builtin(14, fb, 12, 768, 456,
-                                       "当前只支持打开 TXT 文件", FONT_ALIGN_CENTER, GFX_BLACK);
+                                       "当前只支持打开 TXT / EPUB 文件", FONT_ALIGN_CENTER, GFX_BLACK);
     } else {
         font_draw_text_aligned_builtin(14, fb, 12, 768, 456,
                                        "HOME 打开   BACK 返回", FONT_ALIGN_CENTER, GFX_BLACK);
@@ -625,7 +626,7 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
                                            "书籍加载完成后将自动显示", FONT_ALIGN_CENTER, GFX_BLACK);
         } else {
             font_draw_text_aligned_builtin(20, fb, 24, 360, 432,
-                                           "未发现 TXT 书籍", FONT_ALIGN_CENTER, GFX_BLACK);
+                                           "未发现 TXT / EPUB 书籍", FONT_ALIGN_CENTER, GFX_BLACK);
             font_draw_text_aligned_builtin(14, fb, 24, 400, 432,
                                            "请将书籍放入 SD 卡 /books 目录", FONT_ALIGN_CENTER, GFX_BLACK);
         }
@@ -650,7 +651,7 @@ static void render_bookshelf(gfx_framebuffer_t *fb, const app_state_t *app, cons
         snprintf(count_text, sizeof(count_text), "SD 书籍：%d 本", display_count);
         font_draw_text_builtin(14, fb, 18, 779, count_text, GFX_BLACK);
     }
-    font_draw_text_aligned_builtin(14, fb, 308, 779, 144, "仅显示 SD TXT", FONT_ALIGN_RIGHT, GFX_BLACK);
+    font_draw_text_aligned_builtin(14, fb, 286, 779, 166, "显示 SD TXT / EPUB", FONT_ALIGN_RIGHT, GFX_BLACK);
     settings_draw_line(fb, 450, 784, 456, 790, 1, GFX_BLACK);
     settings_draw_line(fb, 456, 790, 462, 784, 1, GFX_BLACK);
 }

@@ -18,12 +18,12 @@ Updated: 2026-07-17
 - Updated EPD packing to a single 48,000-byte `bw` plane.
 - Removed the interactive entertainment module from the shared app state, home navigation, icons, and UI rendering.
 - Kept the reader flow from the simulator branch:
-  - SD-backed TXT library in `src/app/reader_library.c`: keeps metadata/page offsets and reads each rendered page from the card.
+  - SD-backed TXT/EPUB library in `src/app/reader_library.c`: keeps metadata/page offsets and reads each rendered page from the card.
   - Bookshelf selection.
   - Per-book page progress.
   - Per-page reader text loaded from the selected SD file when it is rendered.
   - Plain text can be split automatically when no explicit form-feed page breaks are present.
-  - Desktop simulator startup indexes TXT files under `assets/books/realbook`; no built-in book-text fallback is provided.
+  - Desktop simulator startup indexes TXT and EPUB files under `assets/books/realbook`; no built-in book-text fallback is provided.
   - Recent book marker.
   - Reader menu.
   - Catalog overlay.

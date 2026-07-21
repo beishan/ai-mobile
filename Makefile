@@ -4,9 +4,9 @@ SDL_CFLAGS := $(shell sdl2-config --cflags)
 SDL_LIBS := $(shell sdl2-config --libs)
 
 TEST_BIN := tests/test_runner
-TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/epd_frame.c src/platform/ssd1677.c src/platform/input_debounce.c src/platform/sim_display.c src/platform/sdl_display.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/ui/pages.c src/ui/icons.c src/font/font.c
-SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/sim_display.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/ui/pages.c src/ui/icons.c src/font/font.c
-SDL_SIM_SRCS := src/main_sdl.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/sdl_display.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/ui/pages.c src/ui/icons.c src/font/font.c
+TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/epd_frame.c src/platform/ssd1677.c src/platform/input_debounce.c src/platform/sim_display.c src/platform/sdl_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/epub_reader.c src/ui/pages.c src/ui/icons.c src/font/font.c
+SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/sim_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/epub_reader.c src/ui/pages.c src/ui/icons.c src/font/font.c
+SDL_SIM_SRCS := src/main_sdl.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/sdl_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/epub_reader.c src/ui/pages.c src/ui/icons.c src/font/font.c
 
 # External font test
 EXT_FONT_TEST_BIN := tests/test_external_font
@@ -21,13 +21,13 @@ test-external-font: $(EXT_FONT_TEST_BIN)
 	./$(EXT_FONT_TEST_BIN)
 
 reader_sim: $(SIM_SRCS)
-	$(CC) $(CFLAGS) $(SIM_SRCS) -o reader_sim
+	$(CC) $(CFLAGS) $(SIM_SRCS) -lz -o reader_sim
 
 reader_sim_sdl: $(SDL_SIM_SRCS)
-	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(SDL_SIM_SRCS) $(SDL_LIBS) -o reader_sim_sdl
+	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(SDL_SIM_SRCS) $(SDL_LIBS) -lz -o reader_sim_sdl
 
 $(TEST_BIN): $(TEST_SRCS)
-	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(TEST_SRCS) $(SDL_LIBS) -o $(TEST_BIN)
+	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(TEST_SRCS) $(SDL_LIBS) -lz -o $(TEST_BIN)
 
 $(EXT_FONT_TEST_BIN): $(EXT_FONT_TEST_SRCS)
 	$(CC) $(CFLAGS) $(EXT_FONT_TEST_SRCS) -o $(EXT_FONT_TEST_BIN)
