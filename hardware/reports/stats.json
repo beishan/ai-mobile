@@ -8,11 +8,11 @@
     "copper_layers": 4
   },
   "design": {
-    "footprints": 72,
-    "named_nets": 48,
-    "track_segments": 675,
-    "vias": 64,
-    "routed_track_length_mm": 2150.9,
+    "footprints": 79,
+    "named_nets": 50,
+    "track_segments": 722,
+    "vias": 107,
+    "routed_track_length_mm": 1843.7,
     "copper_zones": 3
   },
   "validation": {

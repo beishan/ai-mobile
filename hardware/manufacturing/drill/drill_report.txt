@@ -1,5 +1,5 @@
 Drill report for ai_mobile_reader_routed.kicad_pcb
-Created on 2026-07-22T19:12:31
+Created on 2026-07-22T20:09:28
 
 Copper Layer Stackup:
     =============================================================
@@ -13,14 +13,14 @@ Drill file 'ai_mobile_reader_routed-PTH.drl' contains
     plated through holes:
     =============================================================
     T1  0.200mm  0.0079"  (12 holes))
-    T2  0.300mm  0.0118"  (64 holes))
+    T2  0.300mm  0.0118"  (107 holes))
     T3  0.500mm  0.0197"  (16 holes))
     T4  0.600mm  0.0236"  (4 holes)  (with 4 slots)
     T5  0.750mm  0.0295"  (2 holes))
-    T6  1.000mm  0.0394"  (22 holes))
+    T6  1.000mm  0.0394"  (6 holes))
     T7  2.500mm  0.0984"  (2 holes))
 
-    Total plated holes count 122
+    Total plated holes count 149
 
 
 Drill file 'ai_mobile_reader_routed-NPTH.drl' contains

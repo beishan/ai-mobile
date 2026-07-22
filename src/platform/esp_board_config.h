@@ -6,7 +6,7 @@
  * ================================================================
  * 本文件集中配置以下硬件模块：
  *   1. 4.26 英寸 480x800 黑白墨水屏（SSD1677，SPI）
- *   2. MicroSD 扩展板（SDSPI/FAT32，与墨水屏共享 SPI 总线）
+ *   2. PCB 板载 MicroSD 卡座（SDSPI/FAT32，与墨水屏共享 SPI 总线）
  *   3. BACK / POWER / UP / HOME / DOWN 五个低电平有效按键
  *   4. SPI 频率、复位时序、BUSY 超时及 SD 卡挂载路径
  *
@@ -52,20 +52,20 @@
 
 /*
  * ----------------------------------------------------------------
- * 模块二：MicroSD 扩展板（SPI 模式）
+ * 模块二：板载 MicroSD 卡座（SPI 模式）
  * ----------------------------------------------------------------
- * SD 扩展板 -> ESP32-S3 接线：
+ * MicroSD 卡座 -> ESP32-S3 接线：
  *   CS   -> GPIO13 ：SD 独立片选，不能与墨水屏 CS(GPIO5)短接
  *   MOSI -> GPIO17 ：与墨水屏 SDA/MOSI 共用
  *   CLK  -> GPIO18 ：与墨水屏 SCK 共用
  *   MISO -> GPIO21 ：SD 向主控返回数据；墨水屏不连接此线
- *   VCC  -> 3V3    ：扩展板必须兼容 3.3V 逻辑和供电
+ *   VCC  -> 3V3    ：卡座直接使用 3.3V 供电
  *   GND  -> GND    ：与主控及墨水屏共地
  *
  * SPI 共享规则：CLK/MOSI 可以并联，但每个模块必须有独立 CS。未被访问
  * 的模块保持 CS 高电平。GPIO21 用作 MISO，保留 GPIO19/20 给原生 USB。
  * SD 卡使用 FAT32，书籍目录为 /books，系统挂载后路径为 /sdcard/books。
- * 若扩展板没有自带上拉电阻，应按模块资料给 SD 信号线增加约 10k 上拉。
+ * PCB 已为 CS、MOSI、MISO 配置 10k 上拉，并为 DAT1、DAT2 配置 47k 上拉。
  */
 #define ESP_SD_PIN_CS 13                /* MCU -> SD：独立片选，低有效 */
 #define ESP_SD_PIN_MOSI ESP_EPD_PIN_SDA /* MCU -> SD：共享 GPIO17 */

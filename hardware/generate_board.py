@@ -50,7 +50,7 @@ for name in (
     "GND", "+3V3", "USB_VBUS", "SYS", "VBAT", "USB_D+", "USB_D-",
     "USB_D+_MCU", "USB_D-_MCU", "CC1", "CC2", "EN", "BOOT",
     "EPD_BUSY", "EPD_RST", "EPD_DC", "EPD_CS", "SPI_SCK", "SPI_MOSI",
-    "SD_CS", "SD_MISO", "BTN_BACK", "BTN_POWER", "BTN_UP", "BTN_HOME",
+    "SD_CS", "SD_MISO", "SD_DAT1", "SD_DAT2", "BTN_BACK", "BTN_POWER", "BTN_UP", "BTN_HOME",
     "BTN_DOWN", "BAT_ADC", "BQ_CHG", "BQ_ILIM", "BQ_TMR", "BQ_ITERM",
     "BQ_ISET", "BQ_TS", "REG_L1", "REG_L2", "REG_VINA", "BOOST_SW",
     "BOOST_FLY", "PREVGH", "PREVGL", "EPD_GDR", "EPD_RESE", "EPD_VDD",
@@ -201,9 +201,21 @@ passive("C", "C22", "4.7uF/25V", 52, 63, "PREVGL", "GND", rotation=90, size="080
 passive("C", "C23", "1uF/25V", 55, 63, "EPD_VCOM", "GND", rotation=90, size="0805")
 
 
-# SD expansion board header. Both columns duplicate the six active signals.
-sd_pads = {"1": "GND", "2": "GND", "3": "+3V3", "4": "+3V3", "5": "SD_CS", "6": "SD_CS", "7": "SPI_MOSI", "8": "SPI_MOSI", "9": "SPI_SCK", "10": "SPI_SCK", "11": "SD_MISO", "12": "SD_MISO", "15": "GND", "16": "GND"}
-load_fp("Connector_PinHeader_2.54mm", "PinHeader_2x08_P2.54mm_Vertical", "J4", "SD_MODULE_2X8", 39.5, 49, rotation=90, pads=sd_pads)
+# On-board push-pull MicroSD socket in SPI mode. The card inserts from the
+# board's right edge. Pads 9/10 are the card-detect switch and are unused.
+sd_pads = {
+    "1": "SD_DAT2", "2": "SD_CS", "3": "SPI_MOSI", "4": "+3V3",
+    "5": "SPI_SCK", "6": "GND", "7": "SD_MISO", "8": "SD_DAT1",
+    "SH": "GND",
+}
+load_fp("Connector_Card", "microSD_HC_Molex_104031-0811", "J4", "Molex 104031-0811 MicroSD", 52, 51, rotation=90, pads=sd_pads)
+passive("C", "C25", "100nF", 41, 47, "+3V3", "GND")
+passive("C", "C26", "10uF/6.3V", 41, 50, "+3V3", "GND", size="0805")
+passive("R", "R21", "10k", 41, 53, "+3V3", "SD_CS")
+passive("R", "R22", "10k", 41, 56, "+3V3", "SPI_MOSI")
+passive("R", "R23", "10k", 41, 59, "+3V3", "SD_MISO")
+passive("R", "R24", "47k", 47, 60, "+3V3", "SD_DAT1")
+passive("R", "R25", "47k", 52, 60, "+3V3", "SD_DAT2")
 
 
 # External five-key harness: BACK, POWER, UP, HOME, DOWN, common GND.
@@ -223,9 +235,13 @@ passive("C", "C24", "100nF", 16, 73, "BAT_ADC", "GND")
 
 
 # Test points for first-board bring-up, particularly the high-voltage EPD rails.
-tp_x = 8
-for idx, signal in enumerate(("GND", "+3V3", "VBAT", "SYS", "EPD_GDR", "EPD_RESE", "PREVGH", "PREVGL"), start=1):
-    load_fp("TestPoint", "TestPoint_Pad_D1.0mm", f"TP{idx}", signal, tp_x + (idx - 1) * 6.3, 55, pads={"1": signal})
+test_points = (
+    ("GND", 8, 55), ("+3V3", 14.3, 55), ("VBAT", 20.6, 55),
+    ("SYS", 26.9, 55), ("EPD_GDR", 33.2, 55), ("EPD_RESE", 37.5, 55),
+    ("PREVGH", 47, 73), ("PREVGL", 54, 73),
+)
+for idx, (signal, x, y) in enumerate(test_points, start=1):
+    load_fp("TestPoint", "TestPoint_Pad_D1.0mm", f"TP{idx}", signal, x, y, pads={"1": signal})
 
 
 # Add orientation and safety notes to silkscreen.

@@ -69,20 +69,23 @@ TP5～TP8 引出 GDR、RESE、PREVGH 和 PREVGL，供首板调试测量。
 - U3 TPS63031 配合 L1 1.5 µH 电感，将 `SYS` 转换为固定 +3.3 V；
 - R19/R20 为 1 MΩ / 330 kΩ 电池采样分压器，连接 GPIO1，C24 用于滤波。
 
-## J4——SD 卡扩展板接口
+## J4——板载 MicroSD 卡座
 
-两列引脚重复传输相同信号：
+J4 使用 Molex 104031-0811 类推拉式 MicroSD 卡座，工作在 SPI 模式，存储卡
+从 PCB 右侧插入。卡座外壳接 GND，旁边配置 100 nF 和 10 µF 去耦电容。
 
-| J4 引脚 | 信号 |
-|---|---|
-| 1、2 | GND |
-| 3、4 | +3V3 |
-| 5、6 | SD_CS |
-| 7、8 | SPI_MOSI |
-| 9、10 | SPI_SCK |
-| 11、12 | SD_MISO |
-| 13、14 | 不连接 |
-| 15、16 | GND |
+| MicroSD 引脚 | SD 信号 | PCB 连接 |
+|---:|---|---|
+| 1 | DAT2 | 通过 47 kΩ 上拉到 +3V3 |
+| 2 | DAT3 / CS | GPIO13 / SD_CS，并通过 10 kΩ 上拉 |
+| 3 | CMD / MOSI | GPIO17 / SPI_MOSI，并通过 10 kΩ 上拉 |
+| 4 | VDD | +3V3 |
+| 5 | CLK | GPIO18 / SPI_SCK |
+| 6 | VSS | GND |
+| 7 | DAT0 / MISO | GPIO21 / SD_MISO，并通过 10 kΩ 上拉 |
+| 8 | DAT1 | 通过 47 kΩ 上拉到 +3V3 |
+| 9、10 | 卡检测开关 | 本版不连接 |
+| SH | 金属外壳 | GND |
 
 ## J5——外接按键接口
 
