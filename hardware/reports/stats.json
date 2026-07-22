@@ -1,0 +1,23 @@
+{
+  "project": "ai_mobile_reader_rev_a",
+  "generator": "KiCad 10.0.4",
+  "board": {
+    "width_mm": 58.0,
+    "height_mm": 102.0,
+    "thickness_mm": 1.6,
+    "copper_layers": 4
+  },
+  "design": {
+    "footprints": 72,
+    "named_nets": 48,
+    "track_segments": 675,
+    "vias": 64,
+    "routed_track_length_mm": 2150.9,
+    "copper_zones": 3
+  },
+  "validation": {
+    "drc_errors": 0,
+    "unconnected_items": 0,
+    "silkscreen_warnings": 30
+  }
+}

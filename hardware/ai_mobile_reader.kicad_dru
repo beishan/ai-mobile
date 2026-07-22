@@ -1,0 +1,14 @@
+(version 1)
+
+# The official ESP32-S3-WROOM-1 footprint uses 0.20 mm thermal vias in its
+# exposed ground pad.  Keep the board-wide 0.30 mm drill rule for all others.
+(rule "ESP32 exposed-pad thermal vias"
+    (condition "A.Reference == 'U1' && A.Pad_Number == '41'")
+    (constraint hole_size (min 0.20mm)))
+
+# The official GCT USB4105 footprint places its two plastic locating holes
+# 0.194 mm from same-footprint grounded shell pads.  This override applies
+# only between items belonging to J1; unrelated copper keeps the 0.25 mm rule.
+(rule "USB4105 locating holes"
+    (condition "A.Reference == 'J1' && B.Reference == 'J1'")
+    (constraint hole_clearance (min 0.15mm)))

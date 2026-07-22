@@ -31,7 +31,7 @@
 
 /*
  * 墨水屏 -> ESP32-S3 接线：
- *   BUSY -> GPIO4  ：屏幕输出，主控输入；高电平表示控制器忙
+ *   BUSY_N -> GPIO4：屏幕输出，主控输入；低电平表示控制器忙
  *   RST  -> GPIO16 ：主控输出，低电平硬件复位；不要接开发板 RST 排针
  *   DC   -> GPIO15 ：主控输出，0=命令，1=数据
  *   CS   -> GPIO5  ：主控输出，低电平选中墨水屏
@@ -48,6 +48,7 @@
 #define ESP_EPD_PIN_CS 5     /* MCU -> EPD：独立片选，低有效 */
 #define ESP_EPD_PIN_SCK 18   /* MCU -> EPD/SD：共享 SPI 时钟 */
 #define ESP_EPD_PIN_SDA 17   /* MCU -> EPD/SD：共享 SPI MOSI */
+#define ESP_EPD_BUSY_ACTIVE_LEVEL 0 /* OSPTEK 24Pin 排线标为 BUSY_N，低有效 */
 
 /*
  * ----------------------------------------------------------------
@@ -107,12 +108,11 @@
 /* ----------------------------------------------------------------
  * 模块五：可选电池电压检测
  * ----------------------------------------------------------------
- * 当前硬件接线表没有电池采样电路，因此默认禁用并在状态栏显示“--”。
- * 启用时必须使用电阻分压，禁止把高于 3.3V 的电池直接接入 GPIO。
- * 例如上下阻值相同的 1:1 分压：GPIO=1、NUMERATOR=2、DENOMINATOR=1。 */
-#define ESP_BATTERY_ADC_GPIO -1
-#define ESP_BATTERY_DIVIDER_NUMERATOR 2
-#define ESP_BATTERY_DIVIDER_DENOMINATOR 1
+ * REV A PCB 使用 1M/330k 分压接 GPIO1；4.2V 电池在 ADC 脚约为 1.04V。
+ * NUMERATOR/DENOMINATOR 表示从 ADC 电压还原电池电压的 133/33 比例。 */
+#define ESP_BATTERY_ADC_GPIO 1
+#define ESP_BATTERY_DIVIDER_NUMERATOR 133
+#define ESP_BATTERY_DIVIDER_DENOMINATOR 33
 #define ESP_BATTERY_EMPTY_MV 3300
 #define ESP_BATTERY_FULL_MV 4200
 

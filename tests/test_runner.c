@@ -313,6 +313,8 @@ static void test_esp_project_targets_ssd1677_bw_panel(void) {
     ASSERT_TRUE(file_contains("sdkconfig.defaults", "CONFIG_SPIRAM_MODE_OCT=y"));
     ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "SSD1677"));
     ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_EPD_PIN_BUSY 4"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_EPD_BUSY_ACTIVE_LEVEL 0"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BATTERY_ADC_GPIO 1"));
     ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_EPD_PIN_RST 16"));
     ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_EPD_PIN_DC 15"));
     ASSERT_TRUE(file_contains("src/platform/ssd1677.c", "0x24"));

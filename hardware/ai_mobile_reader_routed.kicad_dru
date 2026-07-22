@@ -1,0 +1,9 @@
+(version 1)
+
+(rule "ESP32 exposed-pad thermal vias"
+    (condition "A.Reference == 'U1' && A.Pad_Number == '41'")
+    (constraint hole_size (min 0.20mm)))
+
+(rule "USB4105 locating holes"
+    (condition "A.Reference == 'J1' && B.Reference == 'J1'")
+    (constraint hole_clearance (min 0.15mm)))

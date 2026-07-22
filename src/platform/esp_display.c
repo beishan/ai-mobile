@@ -156,7 +156,7 @@ int esp_display_wait_busy(esp_display_t *display, int timeout_ms) {
     if (display == NULL || !display->hardware_ready) {
         return -1;
     }
-    while (gpio_get_level(ESP_EPD_PIN_BUSY) != 0) {
+    while (gpio_get_level(ESP_EPD_PIN_BUSY) == ESP_EPD_BUSY_ACTIVE_LEVEL) {
         if (elapsed_ms >= timeout_ms) {
             ESP_LOGE(TAG, "EPD busy timeout after %d ms", timeout_ms);
             return -1;

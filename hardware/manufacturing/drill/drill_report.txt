@@ -1,0 +1,31 @@
+Drill report for ai_mobile_reader_routed.kicad_pcb
+Created on 2026-07-22T19:12:31
+
+Copper Layer Stackup:
+    =============================================================
+    L1 :  F.Cu                      front
+    L2 :  In1.Cu                    in1
+    L3 :  In2.Cu                    in2
+    L4 :  B.Cu                      back
+
+
+Drill file 'ai_mobile_reader_routed-PTH.drl' contains
+    plated through holes:
+    =============================================================
+    T1  0.200mm  0.0079"  (12 holes))
+    T2  0.300mm  0.0118"  (64 holes))
+    T3  0.500mm  0.0197"  (16 holes))
+    T4  0.600mm  0.0236"  (4 holes)  (with 4 slots)
+    T5  0.750mm  0.0295"  (2 holes))
+    T6  1.000mm  0.0394"  (22 holes))
+    T7  2.500mm  0.0984"  (2 holes))
+
+    Total plated holes count 122
+
+
+Drill file 'ai_mobile_reader_routed-NPTH.drl' contains
+    unplated through holes:
+    =============================================================
+    T1  0.650mm  0.0256"  (2 holes))
+
+    Total unplated holes count 2
