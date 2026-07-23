@@ -68,6 +68,20 @@ static int save_app_configuration(const app_state_t *app, int sd_mounted) {
     return nvs_result;
 }
 
+static int persisted_app_state_changed(const app_state_t *previous,
+                                       const app_state_t *current) {
+    app_persisted_state_t previous_snapshot = {0};
+    app_persisted_state_t current_snapshot = {0};
+
+    if (previous == NULL || current == NULL) {
+        return 1;
+    }
+    app_persistence_capture(previous, &previous_snapshot);
+    app_persistence_capture(current, &current_snapshot);
+    return memcmp(&previous_snapshot, &current_snapshot,
+                  sizeof(previous_snapshot)) != 0;
+}
+
 static void sd_library_progress_callback(int book_index, int percent, void *context) {
     int total = sd_library_total_count;
     (void)context;
@@ -150,16 +164,30 @@ static int present_home_selection_change(esp_display_t *display,
     int new_y;
     int new_w;
     int new_h;
+    int dirty_x;
+    int dirty_y;
+    int dirty_right;
+    int dirty_bottom;
     const int padding = 4;
 
     if (ui_home_tile_bounds(previous_selection, &old_x, &old_y, &old_w, &old_h) != 0 ||
         ui_home_tile_bounds(current_selection, &new_x, &new_y, &new_w, &new_h) != 0) {
         return -1;
     }
-    if (esp_display_present_partial(display, fb, old_x - padding, old_y - padding,
-                                    old_w + padding * 2, old_h + padding * 2) != 0 ||
-        esp_display_present_partial(display, fb, new_x - padding, new_y - padding,
-                                    new_w + padding * 2, new_h + padding * 2) != 0) {
+
+    /* One differential refresh is noticeably faster than refreshing the old
+     * and new tiles separately because each refresh waits for EPD BUSY. */
+    dirty_x = old_x < new_x ? old_x : new_x;
+    dirty_y = old_y < new_y ? old_y : new_y;
+    dirty_right = old_x + old_w > new_x + new_w
+                      ? old_x + old_w
+                      : new_x + new_w;
+    dirty_bottom = old_y + old_h > new_y + new_h
+                       ? old_y + old_h
+                       : new_y + new_h;
+    if (esp_display_present_partial(display, fb, dirty_x - padding, dirty_y - padding,
+                                    dirty_right - dirty_x + padding * 2,
+                                    dirty_bottom - dirty_y + padding * 2) != 0) {
         return -1;
     }
     ESP_LOGI(TAG, "home selection partial refresh: %d -> %d",
@@ -179,11 +207,14 @@ static int present_reader_menu_selection_change(esp_display_t *display,
     const int padding = 4;
     int previous_y = menu_y + 20 + previous_selection * 40 - 4;
     int current_y = menu_y + 20 + current_selection * 40 - 4;
+    int dirty_y = previous_y < current_y ? previous_y : current_y;
+    int dirty_bottom = previous_y > current_y
+                           ? previous_y + selection_height
+                           : current_y + selection_height;
 
-    if (esp_display_present_partial(display, fb, selection_x - padding, previous_y - padding,
-                                    selection_width + padding * 2, selection_height + padding * 2) != 0 ||
-        esp_display_present_partial(display, fb, selection_x - padding, current_y - padding,
-                                    selection_width + padding * 2, selection_height + padding * 2) != 0) {
+    if (esp_display_present_partial(display, fb, selection_x - padding, dirty_y - padding,
+                                    selection_width + padding * 2,
+                                    dirty_bottom - dirty_y + padding * 2) != 0) {
         return -1;
     }
     return 0;
@@ -192,9 +223,79 @@ static int present_reader_menu_selection_change(esp_display_t *display,
 static int present_two_windows(esp_display_t *display, const gfx_framebuffer_t *fb,
                                int x1, int y1, int w1, int h1,
                                int x2, int y2, int w2, int h2) {
-    if (esp_display_present_partial(display, fb, x1, y1, w1, h1) != 0 ||
-        esp_display_present_partial(display, fb, x2, y2, w2, h2) != 0) {
+    int x = x1 < x2 ? x1 : x2;
+    int y = y1 < y2 ? y1 : y2;
+    int right = x1 + w1 > x2 + w2 ? x1 + w1 : x2 + w2;
+    int bottom = y1 + h1 > y2 + h2 ? y1 + h1 : y2 + h2;
+    return esp_display_present_partial(display, fb, x, y, right - x, bottom - y);
+}
+
+static int reader_settings_item_bounds(int selection,
+                                       int *x, int *y, int *width, int *height) {
+    static const int row_y[] = {136, 202, 268, 338, 462, 530, 598, 656, 734};
+    static const int row_height[] = {66, 66, 70, 124, 68, 68, 58, 60, 60};
+
+    if (selection < 0 || selection >= 9 || x == NULL || y == NULL ||
+        width == NULL || height == NULL) {
         return -1;
+    }
+    *x = 23;
+    *y = row_y[selection];
+    *width = 434;
+    *height = row_height[selection];
+    return 0;
+}
+
+static int settings_item_bounds(int selection, int scroll,
+                                int *x, int *y, int *width, int *height) {
+    static const int row_y[] = {
+        184, 240, 364, 420, 544, 600, 724, 854, 910, 966, 1022
+    };
+
+    if (selection < 0 || selection >= 11 || x == NULL || y == NULL ||
+        width == NULL || height == NULL) {
+        return -1;
+    }
+    *x = 27;
+    *y = row_y[selection] - scroll;
+    *width = 428;
+    *height = 56;
+    return 0;
+}
+
+static void wifi_network_window_starts(const app_state_t *app, int selection,
+                                       int *saved_first, int *scan_first) {
+    const int saved_visible = 2;
+    const int scan_visible = 5;
+    int selected_scan;
+
+    *saved_first = 0;
+    *scan_first = 0;
+    if (selection < app->wifi_saved_count && selection >= saved_visible) {
+        *saved_first = selection - saved_visible + 1;
+    }
+    selected_scan = selection - app->wifi_saved_count;
+    if (selected_scan >= scan_visible) {
+        *scan_first = selected_scan - scan_visible + 1;
+    }
+}
+
+static int wifi_network_selection_bounds(const app_state_t *app, int selection,
+                                         int saved_first, int scan_first,
+                                         int *x, int *y, int *width, int *height) {
+    if (app == NULL || selection < 0 ||
+        selection >= app->wifi_saved_count + app->wifi_network_count ||
+        x == NULL || y == NULL || width == NULL || height == NULL) {
+        return -1;
+    }
+    *x = 18;
+    *width = 444;
+    if (selection < app->wifi_saved_count) {
+        *y = 229 + (selection - saved_first) * 50;
+        *height = 44;
+    } else {
+        *y = 365 + (selection - app->wifi_saved_count - scan_first) * 68;
+        *height = 58;
     }
     return 0;
 }
@@ -291,34 +392,6 @@ static int present_file_browser_selection_change(esp_display_t *display,
                                448, row_height + 10);
 }
 
-static int present_reader_page_animation(esp_display_t *display,
-                                         const gfx_framebuffer_t *fb,
-                                         int page_turn_mode) {
-    const int x = 20;
-    const int y = 60;
-    const int width = 440;
-    const int height = 740;
-    const int steps = 4;
-    if (page_turn_mode == 2) {
-        return esp_display_present_partial(display, fb, x, y, width, height);
-    }
-    for (int step = 0; step < steps; step++) {
-        int result;
-        if (page_turn_mode == 1) {
-            int band_y = y + step * height / steps;
-            int band_h = (step == steps - 1) ? y + height - band_y : height / steps;
-            result = esp_display_present_partial(display, fb, x, band_y, width, band_h);
-        } else {
-            int band_x = x + (steps - step - 1) * width / steps;
-            int band_right = x + (steps - step) * width / steps;
-            int band_w = band_right - band_x;
-            result = esp_display_present_partial(display, fb, band_x, y, band_w, height);
-        }
-        if (result != 0) return -1;
-    }
-    return 0;
-}
-
 static int present_reader_incremental_change(esp_display_t *display,
                                              const gfx_framebuffer_t *fb,
                                              app_page_t previous_page,
@@ -327,17 +400,10 @@ static int present_reader_incremental_change(esp_display_t *display,
                                              app_button_t button) {
     if (previous_page == APP_PAGE_READER && current->page == APP_PAGE_READER) {
         if (previous->reader_page != current->reader_page) {
-            /* Reader page turns use the partial waveform in every mode.
-             * The display layer still performs a periodic full refresh to
-             * clear accumulated ghosting. */
-            if (current->reader_refresh_mode == 0) {
-                return esp_display_present_partial(display, fb, 20, 60, 440, 740);
-            }
-            if (current->reader_refresh_mode == 2) {
-                return esp_display_present_partial(display, fb, 20, 60, 440, 740);
-            }
-            return present_reader_page_animation(display, fb,
-                                                 current->reader_page_turn_mode);
+            /* Multi-step band animations require four complete EPD BUSY
+             * cycles. A single differential update keeps every refresh mode
+             * responsive; periodic full refresh still clears ghosting. */
+            return esp_display_present_partial(display, fb, 20, 60, 440, 740);
         }
         if (previous->reader_menu_open != current->reader_menu_open) {
             /* Opening/closing the centered reader menu only changes this overlay. */
@@ -352,6 +418,13 @@ static int present_reader_incremental_change(esp_display_t *display,
     }
 
     if (current->page == APP_PAGE_READER && previous_page != APP_PAGE_READER) {
+        return esp_display_present_partial(display, fb, 0, 32,
+                                           GFX_WIDTH, GFX_HEIGHT - 32);
+    }
+
+    if (previous_page == APP_PAGE_READER &&
+        (current->page == APP_PAGE_READER_CATALOG ||
+         current->page == APP_PAGE_READER_SETTINGS)) {
         return esp_display_present_partial(display, fb, 0, 32,
                                            GFX_WIDTH, GFX_HEIGHT - 32);
     }
@@ -398,11 +471,9 @@ static int present_reader_incremental_change(esp_display_t *display,
         }
         old_y = 22 + (previous->reader_catalog_selection - old_start) * 52;
         new_y = 22 + (current->reader_catalog_selection - new_start) * 52;
-        if (esp_display_present_partial(display, fb, row_x, old_y, row_width, row_height) != 0 ||
-            esp_display_present_partial(display, fb, row_x, new_y, row_width, row_height) != 0) {
-            return -1;
-        }
-        return 0;
+        return present_two_windows(display, fb,
+                                   row_x, old_y, row_width, row_height,
+                                   row_x, new_y, row_width, row_height);
     }
 
     if (previous_page == APP_PAGE_READER_SETTINGS && current->page == APP_PAGE_READER_SETTINGS &&
@@ -424,7 +495,35 @@ static int present_reader_incremental_change(esp_display_t *display,
          previous->reader_bold_enabled != current->reader_bold_enabled ||
          previous->reader_page_turn_mode != current->reader_page_turn_mode ||
          previous->reader_refresh_mode != current->reader_refresh_mode)) {
-        return esp_display_present_partial(display, fb, 20, 84, 440, 640);
+        int old_x;
+        int old_y;
+        int old_width;
+        int old_height;
+        int new_x;
+        int new_y;
+        int new_width;
+        int new_height;
+
+        if (previous->reader_settings_selection != current->reader_settings_selection) {
+            if (reader_settings_item_bounds(previous->reader_settings_selection,
+                                            &old_x, &old_y, &old_width, &old_height) != 0 ||
+                reader_settings_item_bounds(current->reader_settings_selection,
+                                            &new_x, &new_y, &new_width, &new_height) != 0) {
+                return -1;
+            }
+            return present_two_windows(display, fb,
+                                       old_x, old_y, old_width, old_height,
+                                       new_x, new_y, new_width, new_height);
+        }
+        if (current->reader_settings_selection == 8) {
+            return esp_display_present_partial(display, fb, 20, 84, 440, 710);
+        }
+        if (reader_settings_item_bounds(current->reader_settings_selection,
+                                        &new_x, &new_y, &new_width, &new_height) != 0) {
+            return -1;
+        }
+        return esp_display_present_partial(display, fb, new_x, new_y,
+                                           new_width, new_height);
     }
 
     if (previous_page == APP_PAGE_BOOKSHELF && current->page == APP_PAGE_BOOKSHELF &&
@@ -479,7 +578,103 @@ static int present_reader_incremental_change(esp_display_t *display,
          previous->weather_city_index != current->weather_city_index ||
          previous->power_saving_enabled != current->power_saving_enabled ||
          previous->bookshelf_layout != current->bookshelf_layout)) {
-        return esp_display_present_partial(display, fb, 0, 40, GFX_WIDTH, GFX_HEIGHT - 40);
+        int old_x;
+        int old_y;
+        int old_width;
+        int old_height;
+        int new_x;
+        int new_y;
+        int new_width;
+        int new_height;
+        if (previous->settings_scroll != current->settings_scroll) {
+            return esp_display_present_partial(display, fb, 0, 40,
+                                               GFX_WIDTH, GFX_HEIGHT - 40);
+        }
+        if (settings_item_bounds(previous->settings_selection, previous->settings_scroll,
+                                 &old_x, &old_y, &old_width, &old_height) != 0 ||
+            settings_item_bounds(current->settings_selection, current->settings_scroll,
+                                 &new_x, &new_y, &new_width, &new_height) != 0) {
+            return -1;
+        }
+        return present_two_windows(display, fb,
+                                   old_x, old_y, old_width, old_height,
+                                   new_x, new_y, new_width, new_height);
+    }
+
+    if (previous_page == APP_PAGE_WIFI_SETUP && current->page == APP_PAGE_WIFI_SETUP &&
+        previous->wifi_setup_stage == APP_WIFI_STAGE_NETWORKS &&
+        current->wifi_setup_stage == APP_WIFI_STAGE_NETWORKS &&
+        previous->wifi_network_selection != current->wifi_network_selection &&
+        previous->wifi_saved_count == current->wifi_saved_count &&
+        previous->wifi_network_count == current->wifi_network_count &&
+        previous->wifi_scan_in_progress == current->wifi_scan_in_progress &&
+        memcmp(previous->wifi_saved_ssids, current->wifi_saved_ssids,
+               sizeof(current->wifi_saved_ssids)) == 0 &&
+        memcmp(previous->wifi_network_ssids, current->wifi_network_ssids,
+               sizeof(current->wifi_network_ssids)) == 0 &&
+        memcmp(previous->wifi_network_rssi, current->wifi_network_rssi,
+               sizeof(current->wifi_network_rssi)) == 0 &&
+        memcmp(previous->wifi_network_secure, current->wifi_network_secure,
+               sizeof(current->wifi_network_secure)) == 0) {
+        int old_saved_first;
+        int old_scan_first;
+        int new_saved_first;
+        int new_scan_first;
+        int old_x;
+        int old_y;
+        int old_width;
+        int old_height;
+        int new_x;
+        int new_y;
+        int new_width;
+        int new_height;
+        wifi_network_window_starts(previous, previous->wifi_network_selection,
+                                   &old_saved_first, &old_scan_first);
+        wifi_network_window_starts(current, current->wifi_network_selection,
+                                   &new_saved_first, &new_scan_first);
+        if (old_saved_first != new_saved_first || old_scan_first != new_scan_first) {
+            return esp_display_present_partial(display, fb, 18, 225, 444, 490);
+        }
+        if (wifi_network_selection_bounds(previous, previous->wifi_network_selection,
+                                          old_saved_first, old_scan_first,
+                                          &old_x, &old_y, &old_width, &old_height) != 0 ||
+            wifi_network_selection_bounds(current, current->wifi_network_selection,
+                                          new_saved_first, new_scan_first,
+                                          &new_x, &new_y, &new_width, &new_height) != 0) {
+            return -1;
+        }
+        return present_two_windows(display, fb,
+                                   old_x, old_y, old_width, old_height,
+                                   new_x, new_y, new_width, new_height);
+    }
+
+    if (previous_page == APP_PAGE_WIFI_SETUP && current->page == APP_PAGE_WIFI_SETUP &&
+        previous->wifi_setup_stage == APP_WIFI_STAGE_KEYBOARD &&
+        current->wifi_setup_stage == APP_WIFI_STAGE_KEYBOARD &&
+        previous->wifi_edit_char_index != current->wifi_edit_char_index) {
+        int old_index = previous->wifi_edit_char_index;
+        int new_index = current->wifi_edit_char_index;
+        return present_two_windows(display, fb,
+                                   17 + (old_index % 10) * 45,
+                                   216 + (old_index / 10) * 58, 40, 46,
+                                   17 + (new_index % 10) * 45,
+                                   216 + (new_index / 10) * 58, 40, 46);
+    }
+
+    if (previous_page == APP_PAGE_WIFI_SETUP && current->page == APP_PAGE_WIFI_SETUP &&
+        previous->wifi_setup_stage == APP_WIFI_STAGE_KEYBOARD &&
+        current->wifi_setup_stage == APP_WIFI_STAGE_KEYBOARD &&
+        strcmp(previous->wifi_password, current->wifi_password) != 0) {
+        return esp_display_present_partial(display, fb, 20, 132, 440, 54);
+    }
+
+    if (previous_page == APP_PAGE_WIFI_SETUP && current->page == APP_PAGE_WIFI_SETUP &&
+        previous->wifi_setup_stage == APP_WIFI_STAGE_CONFIRM &&
+        current->wifi_setup_stage == APP_WIFI_STAGE_CONFIRM &&
+        previous->wifi_setup_selection != current->wifi_setup_selection) {
+        return present_two_windows(display, fb,
+                                   40, 270 + previous->wifi_setup_selection * 92, 400, 68,
+                                   40, 270 + current->wifi_setup_selection * 92, 400, 68);
     }
 
     if (previous_page == APP_PAGE_WIFI_SETUP && current->page == APP_PAGE_WIFI_SETUP &&
@@ -514,6 +709,7 @@ static long long current_epoch_minute(void) {
 typedef struct {
     gfx_framebuffer_t *fb;
     esp_display_t *display;
+    int last_presented_percent;
 } reader_pagination_progress_t;
 
 static void present_reader_pagination_progress(int book_index, int percent, void *context) {
@@ -524,6 +720,13 @@ static void present_reader_pagination_progress(int book_index, int percent, void
     if (progress == NULL || progress->fb == NULL || progress->display == NULL) return;
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
+    /* E-paper progress animation is expensive. Show the initial feedback and
+     * one useful midpoint; the completed page is rendered immediately after. */
+    if (percent >= 100 ||
+        (percent > 0 && percent - progress->last_presented_percent < 50)) {
+        return;
+    }
+    progress->last_presented_percent = percent;
     if (percent == 0) {
         gfx_clear(progress->fb, GFX_WHITE);
     } else {
@@ -792,7 +995,9 @@ void app_main(void) {
             app_page_t previous_page = previous_app.page;
             int previous_home_selection = previous_app.home_selection;
             int partial_home_selection;
-            reader_pagination_progress_t button_pagination_progress = {fb, &display};
+            int button_state_changed;
+            int persistence_changed;
+            reader_pagination_progress_t button_pagination_progress = {fb, &display, -100};
             ESP_LOGI(TAG, "button event %d on page %s", button, app_page_name(app.page));
             if (button == APP_BUTTON_POWER_LONG) {
                 if (sd_library_state != SD_LIBRARY_LOADING &&
@@ -857,24 +1062,46 @@ void app_main(void) {
                                      app.page == APP_PAGE_HOME &&
                                      previous_home_selection != app.home_selection &&
                                      (button == APP_BUTTON_UP || button == APP_BUTTON_DOWN);
-            if (sd_library_state != SD_LIBRARY_LOADING) {
+            button_state_changed = memcmp(&previous_app, &app, sizeof(app)) != 0;
+            persistence_changed = persisted_app_state_changed(&previous_app, &app);
+            if (button_state_changed) {
+                int present_result;
+                ui_render_page(fb, &app, &font);
+                if (partial_home_selection) {
+                    present_result = present_home_selection_change(
+                        &display, fb, previous_home_selection, app.home_selection);
+                } else {
+                    present_result = present_reader_incremental_change(
+                        &display, fb, previous_page, &previous_app, &app, button);
+                }
+                if (present_result != 0) {
+                    /* Unknown page transitions still use the fast waveform.
+                     * The display layer promotes every Nth partial update to a
+                     * full refresh automatically to control ghosting. */
+                    present_result = esp_display_present_partial(
+                        &display, fb, 0, 0, GFX_WIDTH, GFX_HEIGHT);
+                }
+                if (present_result != 0 &&
+                    esp_display_present(&display, fb) != 0) {
+                    ESP_LOGE(TAG, "failed to present button frame");
+                }
+            } else {
+                ESP_LOGD(TAG, "button produced no visible state change; skipped refresh");
+            }
+
+            /* Persist after the visible update so flash and SD latency never
+             * delays button feedback. Transient cursor/menu state is skipped. */
+            if (sd_library_state == SD_LIBRARY_LOADING) {
+                ESP_LOGD(TAG, "deferred state save until book library is ready");
+            } else if (persistence_changed) {
                 if (save_app_configuration(&app, sd_mounted) != 0) {
                     ESP_LOGW(TAG, "failed to save app state to NVS");
                 }
             } else {
-                ESP_LOGD(TAG, "deferred state save until book library is ready");
-            }
-            ui_render_page(fb, &app, &font);
-            if (!(partial_home_selection &&
-                  present_home_selection_change(&display, fb, previous_home_selection,
-                                                app.home_selection) == 0) &&
-                present_reader_incremental_change(&display, fb, previous_page,
-                                                  &previous_app, &app, button) != 0 &&
-                esp_display_present(&display, fb) != 0) {
-                ESP_LOGE(TAG, "failed to present button frame");
+                ESP_LOGD(TAG, "skipped persistence for transient UI state");
             }
             {
-                reader_pagination_progress_t pagination_progress = {fb, &display};
+                reader_pagination_progress_t pagination_progress = {fb, &display, -100};
                 int layout_applied;
                 reader_library_set_progress_callback(present_reader_pagination_progress,
                                                       &pagination_progress);

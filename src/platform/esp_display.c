@@ -325,7 +325,9 @@ int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t 
     if (x_end > SSD1677_PANEL_WIDTH) x_end = SSD1677_PANEL_WIDTH;
     native_width = x_end - native_x;
 
-    if (epd_frame_pack(fb, &packed_frame) != 0) {
+    if (epd_frame_pack_partial(fb, &packed_frame,
+                               native_x, native_y,
+                               native_width, native_height) != 0) {
         return -1;
     }
     if (!display->hardware_ready) {

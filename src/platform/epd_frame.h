@@ -11,5 +11,8 @@ typedef struct {
 } epd_frame_t;
 
 int epd_frame_pack(const gfx_framebuffer_t *fb, epd_frame_t *frame);
+int epd_frame_pack_partial(const gfx_framebuffer_t *fb, epd_frame_t *frame,
+                           int native_x, int native_y,
+                           int native_width, int native_height);
 
 #endif

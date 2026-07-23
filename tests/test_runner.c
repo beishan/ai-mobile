@@ -163,6 +163,23 @@ static void test_epd_frame_pack_is_single_bw_plane(void) {
     ASSERT_EQ_INT(0x7f, frame.bw[1]);
 }
 
+static void test_epd_frame_partial_pack_only_updates_requested_window(void) {
+    gfx_framebuffer_t fb;
+    epd_frame_t frame;
+
+    gfx_init(&fb);
+    gfx_clear(&fb, GFX_WHITE);
+    memset(frame.bw, 0xaa, sizeof(frame.bw));
+    gfx_set_pixel(&fb, 479, 0, GFX_BLACK);
+    gfx_set_pixel(&fb, 479, 7, GFX_BLACK);
+    gfx_set_pixel(&fb, 479, 8, GFX_BLACK);
+
+    ASSERT_EQ_INT(0, epd_frame_pack_partial(&fb, &frame, 0, 0, 8, 1));
+    ASSERT_EQ_INT(0x7e, frame.bw[0]);
+    ASSERT_EQ_INT(0xaa, frame.bw[1]);
+    ASSERT_EQ_INT(-1, epd_frame_pack_partial(&fb, &frame, 1, 0, 8, 1));
+}
+
 #define SSD1677_TEST_MAX_EVENTS 64
 
 typedef struct {
@@ -1706,6 +1723,7 @@ int main(void) {
     test_rectangles_clip_and_place_black_pixels();
     test_display_commit_writes_480x800_ppm();
     test_epd_frame_pack_is_single_bw_plane();
+    test_epd_frame_partial_pack_only_updates_requested_window();
     test_ssd1677_full_refresh_and_sleep_sequence();
     test_ssd1677_partial_refresh_updates_only_window();
     test_target_documents_reference_ssd1677_and_no_game_module();
