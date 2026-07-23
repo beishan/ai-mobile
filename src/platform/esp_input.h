@@ -19,5 +19,8 @@ typedef struct {
 
 void esp_input_init(esp_input_t *input);
 int esp_input_poll_button(esp_input_t *input, app_button_t *button);
+int esp_input_poll_button_batch(esp_input_t *input, app_button_t *button,
+                                int *repeat_count);
+int esp_input_pending_count(const esp_input_t *input);
 
 #endif

@@ -4,11 +4,13 @@
 #include "driver/spi_master.h"
 #include "gfx/gfx.h"
 #include "platform/ssd1677.h"
+#include <stdint.h>
 
 typedef struct {
     int refresh_count;
     int partial_refresh_count;
     int partial_since_full;
+    uint32_t partial_area_since_full;
     int hardware_ready;
     spi_device_handle_t spi;
     ssd1677_t controller;

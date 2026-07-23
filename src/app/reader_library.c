@@ -25,7 +25,7 @@
 #define READER_CACHE_FILE_NAME ".ai_mobile_index.bin"
 #define READER_CACHE_TEMP_NAME ".ai_mobile_index.tmp"
 #define READER_CACHE_BACKUP_NAME ".ai_mobile_index.bak"
-#define READER_INITIAL_READY_PAGES 32
+#define READER_INITIAL_READY_PAGES 16
 
 typedef struct {
     reader_book_t info;
@@ -85,6 +85,8 @@ typedef struct {
 
 static reader_book_slot_t *slots;
 static char page_text[READER_PAGE_TEXT_MAX];
+static FILE *page_text_stream;
+static uint32_t page_text_stream_book_id;
 static reader_layout_t layout = {20, 0, 424, 690, 36, 1, 0};
 static char cache_directory[READER_BOOK_PATH_MAX];
 static reader_library_progress_callback_t progress_callback;
@@ -668,6 +670,11 @@ fail:
 
 static int clear_library(void) {
     if (ensure_slots() != 0) return -1;
+    if (page_text_stream != NULL) {
+        fclose(page_text_stream);
+        page_text_stream = NULL;
+        page_text_stream_book_id = 0;
+    }
     memset(slots, 0, sizeof(*slots) * APP_BOOK_COUNT);
     return 0;
 }
@@ -917,21 +924,26 @@ int reader_library_is_truncated(int book_index) {
 
 const char *reader_library_page_text(int book_index, int page_index) {
     reader_book_slot_t *slot;
-    FILE *file = NULL;
     long length;
     size_t read;
     if (book_index < 0 || book_index >= reader_library_book_count()) return "";
     slot = &slots[book_index];
     if (page_index < 0 || page_index >= slot->page_count) return "";
+    if (page_text_stream == NULL || page_text_stream_book_id != slot->id) {
+        if (page_text_stream != NULL) fclose(page_text_stream);
+        page_text_stream = fopen(slot->content_path, "rb");
+        page_text_stream_book_id = page_text_stream != NULL ? slot->id : 0;
+    }
     length = slot->page_offsets[page_index + 1] - slot->page_offsets[page_index];
     if (length <= 0 || length >= READER_PAGE_TEXT_MAX ||
-        (file = fopen(slot->content_path, "rb")) == NULL ||
-        fseek(file, slot->page_offsets[page_index], SEEK_SET) != 0) {
-        if (file != NULL) fclose(file);
+        page_text_stream == NULL ||
+        fseek(page_text_stream, slot->page_offsets[page_index], SEEK_SET) != 0) {
+        if (page_text_stream != NULL) fclose(page_text_stream);
+        page_text_stream = NULL;
+        page_text_stream_book_id = 0;
         return "";
     }
-    read = fread(page_text, 1, (size_t)length, file);
-    fclose(file);
+    read = fread(page_text, 1, (size_t)length, page_text_stream);
     while (read > 0 && page_text[read - 1] == '\f') read--;
     page_text[read] = '\0';
     return page_text;

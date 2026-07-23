@@ -50,7 +50,7 @@ static int esp_input_scan_button(esp_input_t *input, app_button_t *button) {
             input_debounce_event_t event = input_debounce_update_hold(
                 &input->debounce[i], pressed, long_press_samples());
             if (input->debounce[i].debounced_pressed != was_pressed) {
-                ESP_LOGI(TAG, "button %s GPIO%d %s (debounced)",
+                ESP_LOGD(TAG, "button %s GPIO%d %s (debounced)",
                          BUTTONS[i].name, BUTTONS[i].pin,
                          input->debounce[i].debounced_pressed ? "PRESSED" : "RELEASED");
             }
@@ -69,13 +69,13 @@ static int esp_input_scan_button(esp_input_t *input, app_button_t *button) {
         } else {
             int event = input_debounce_update(&input->debounce[i], pressed);
             if (input->debounce[i].debounced_pressed != was_pressed) {
-                ESP_LOGI(TAG, "button %s GPIO%d %s (debounced)",
+                ESP_LOGD(TAG, "button %s GPIO%d %s (debounced)",
                          BUTTONS[i].name, BUTTONS[i].pin,
                          input->debounce[i].debounced_pressed ? "PRESSED" : "RELEASED");
             }
             if (event) {
                 *button = BUTTONS[i].button;
-                ESP_LOGI(TAG, "button %s GPIO%d event=PRESS app_button=%d",
+                ESP_LOGD(TAG, "button %s GPIO%d event=PRESS app_button=%d",
                          BUTTONS[i].name, BUTTONS[i].pin, (int)*button);
                 return 1;
             }
@@ -144,11 +144,44 @@ void esp_input_init(esp_input_t *input) {
 }
 
 int esp_input_poll_button(esp_input_t *input, app_button_t *button) {
+    int repeat_count;
+    return esp_input_poll_button_batch(input, button, &repeat_count);
+}
+
+int esp_input_poll_button_batch(esp_input_t *input, app_button_t *button,
+                                int *repeat_count) {
     if (input == NULL || button == NULL) {
         return 0;
     }
+    if (repeat_count != NULL) {
+        *repeat_count = 1;
+    }
     if (input->scan_task_started && input->event_queue != NULL) {
-        return xQueueReceive(input->event_queue, button, 0) == pdTRUE;
+        app_button_t queued;
+        int count = 1;
+        if (xQueueReceive(input->event_queue, button, 0) != pdTRUE) {
+            return 0;
+        }
+        if (*button == APP_BUTTON_UP || *button == APP_BUTTON_DOWN) {
+            while (xQueuePeek(input->event_queue, &queued, 0) == pdTRUE &&
+                   queued == *button) {
+                if (xQueueReceive(input->event_queue, &queued, 0) != pdTRUE) {
+                    break;
+                }
+                count++;
+            }
+        }
+        if (repeat_count != NULL) {
+            *repeat_count = count;
+        }
+        return 1;
     }
     return esp_input_scan_button(input, button);
+}
+
+int esp_input_pending_count(const esp_input_t *input) {
+    if (input == NULL || !input->scan_task_started || input->event_queue == NULL) {
+        return 0;
+    }
+    return (int)uxQueueMessagesWaiting(input->event_queue);
 }

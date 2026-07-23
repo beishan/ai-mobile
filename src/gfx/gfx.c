@@ -1,6 +1,7 @@
 #include "gfx/gfx.h"
 
 #include <stddef.h>
+#include <string.h>
 
 static int in_bounds(int x, int y) {
     return x >= 0 && x < GFX_WIDTH && y >= 0 && y < GFX_HEIGHT;
@@ -15,11 +16,7 @@ void gfx_clear(gfx_framebuffer_t *fb, gfx_color_t color) {
         return;
     }
 
-    for (int y = 0; y < GFX_HEIGHT; y++) {
-        for (int x = 0; x < GFX_WIDTH; x++) {
-            fb->pixels[y][x] = (uint8_t)color;
-        }
-    }
+    memset(fb->pixels, (uint8_t)color, sizeof(fb->pixels));
 }
 
 int gfx_width(const gfx_framebuffer_t *fb) {
@@ -64,11 +61,12 @@ void gfx_fill_rect(gfx_framebuffer_t *fb, int x, int y, int w, int h, gfx_color_
     if (y1 > GFX_HEIGHT) {
         y1 = GFX_HEIGHT;
     }
+    if (x0 >= x1 || y0 >= y1) {
+        return;
+    }
 
     for (int py = y0; py < y1; py++) {
-        for (int px = x0; px < x1; px++) {
-            fb->pixels[py][px] = (uint8_t)color;
-        }
+        memset(&fb->pixels[py][x0], (uint8_t)color, (size_t)(x1 - x0));
     }
 }
 

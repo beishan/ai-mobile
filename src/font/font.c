@@ -113,13 +113,21 @@ int font_decode_utf8(const unsigned char **cursor, uint32_t *codepoint) {
 }
 
 const font_glyph_t *font_find_glyph(const font_face_t *font, uint32_t codepoint) {
+    int low;
+    int high;
     if (font == NULL || font->glyphs == NULL) {
         return NULL;
     }
-    for (int i = 0; i < font->glyph_count; i++) {
-        if (font->glyphs[i].codepoint == codepoint) {
-            return &font->glyphs[i];
+    low = 0;
+    high = font->glyph_count - 1;
+    while (low <= high) {
+        int middle = low + (high - low) / 2;
+        uint32_t candidate = font->glyphs[middle].codepoint;
+        if (candidate == codepoint) {
+            return &font->glyphs[middle];
         }
+        if (candidate < codepoint) low = middle + 1;
+        else high = middle - 1;
     }
     return NULL;
 }
@@ -150,11 +158,16 @@ static void draw_replacement(const font_face_t *font, gfx_framebuffer_t *fb, int
 
 static void draw_glyph_bitmap(const font_face_t *font, gfx_framebuffer_t *fb, const font_glyph_t *glyph, int x, int y, gfx_color_t color) {
     int bytes_per_row = (font->size + 7) / 8;
-    for (int row = 0; row < font->size; row++) {
-        for (int col = 0; col < font->size; col++) {
+    int row_start = y < 0 ? -y : 0;
+    int row_end = y + font->size > GFX_HEIGHT ? GFX_HEIGHT - y : font->size;
+    int col_start = x < 0 ? -x : 0;
+    int col_end = x + font->size > GFX_WIDTH ? GFX_WIDTH - x : font->size;
+    if (fb == NULL || row_start >= row_end || col_start >= col_end) return;
+    for (int row = row_start; row < row_end; row++) {
+        for (int col = col_start; col < col_end; col++) {
             uint8_t byte = glyph->bitmap[row * bytes_per_row + col / 8];
             if ((byte & (uint8_t)(1u << (7 - (col % 8)))) != 0) {
-                gfx_set_pixel(fb, x + col, y + row, color);
+                fb->pixels[y + row][x + col] = (uint8_t)color;
             }
         }
     }
@@ -276,6 +289,102 @@ void font_draw_text_box(const font_face_t *font, gfx_framebuffer_t *fb, int x, i
 }
 
 /* ============== External Binary Font Implementation ============== */
+
+#define EXTERNAL_FONT_STREAM_CACHE_SIZE 1
+#define EXTERNAL_GLYPH_CACHE_SIZE 16
+#define EXTERNAL_GLYPH_CACHE_BYTES 1024
+
+typedef struct {
+    const external_font_t *font;
+    FILE *stream;
+    unsigned int used_at;
+} external_font_stream_cache_t;
+
+typedef struct {
+    const external_font_t *font;
+    uint32_t codepoint;
+    int byte_count;
+    unsigned int used_at;
+    unsigned char bitmap[EXTERNAL_GLYPH_CACHE_BYTES];
+} external_glyph_cache_t;
+
+static external_font_stream_cache_t external_stream_cache[EXTERNAL_FONT_STREAM_CACHE_SIZE];
+static external_glyph_cache_t external_glyph_cache[EXTERNAL_GLYPH_CACHE_SIZE];
+static unsigned int external_cache_clock;
+
+static FILE *external_font_cached_stream(const external_font_t *efont) {
+    int replacement = 0;
+    for (int i = 0; i < EXTERNAL_FONT_STREAM_CACHE_SIZE; i++) {
+        if (external_stream_cache[i].font == efont &&
+            external_stream_cache[i].stream != NULL) {
+            external_stream_cache[i].used_at = ++external_cache_clock;
+            return external_stream_cache[i].stream;
+        }
+        if (external_stream_cache[i].stream == NULL ||
+            external_stream_cache[i].used_at < external_stream_cache[replacement].used_at) {
+            replacement = i;
+        }
+    }
+    if (external_stream_cache[replacement].stream != NULL) {
+        fclose(external_stream_cache[replacement].stream);
+    }
+    external_stream_cache[replacement].stream = fopen(efont->path, "rb");
+    external_stream_cache[replacement].font =
+        external_stream_cache[replacement].stream != NULL ? efont : NULL;
+    external_stream_cache[replacement].used_at = ++external_cache_clock;
+    return external_stream_cache[replacement].stream;
+}
+
+static const unsigned char *external_font_cached_glyph(const external_font_t *efont,
+                                                       FILE *stream,
+                                                       uint32_t codepoint) {
+    int replacement = 0;
+    int offset;
+    if (efont->bytes_per_glyph <= 0 ||
+        efont->bytes_per_glyph > EXTERNAL_GLYPH_CACHE_BYTES) {
+        return NULL;
+    }
+    for (int i = 0; i < EXTERNAL_GLYPH_CACHE_SIZE; i++) {
+        if (external_glyph_cache[i].font == efont &&
+            external_glyph_cache[i].codepoint == codepoint &&
+            external_glyph_cache[i].byte_count == efont->bytes_per_glyph) {
+            external_glyph_cache[i].used_at = ++external_cache_clock;
+            return external_glyph_cache[i].bitmap;
+        }
+        if (external_glyph_cache[i].font == NULL ||
+            external_glyph_cache[i].used_at < external_glyph_cache[replacement].used_at) {
+            replacement = i;
+        }
+    }
+    offset = (int)codepoint * efont->bytes_per_glyph;
+    if (stream == NULL || fseek(stream, offset, SEEK_SET) != 0 ||
+        fread(external_glyph_cache[replacement].bitmap, 1,
+              (size_t)efont->bytes_per_glyph, stream) !=
+            (size_t)efont->bytes_per_glyph) {
+        return NULL;
+    }
+    external_glyph_cache[replacement].font = efont;
+    external_glyph_cache[replacement].codepoint = codepoint;
+    external_glyph_cache[replacement].byte_count = efont->bytes_per_glyph;
+    external_glyph_cache[replacement].used_at = ++external_cache_clock;
+    return external_glyph_cache[replacement].bitmap;
+}
+
+static void external_font_cache_forget(const external_font_t *efont) {
+    for (int i = 0; i < EXTERNAL_FONT_STREAM_CACHE_SIZE; i++) {
+        if (external_stream_cache[i].font == efont) {
+            if (external_stream_cache[i].stream != NULL) {
+                fclose(external_stream_cache[i].stream);
+            }
+            memset(&external_stream_cache[i], 0, sizeof(external_stream_cache[i]));
+        }
+    }
+    for (int i = 0; i < EXTERNAL_GLYPH_CACHE_SIZE; i++) {
+        if (external_glyph_cache[i].font == efont) {
+            memset(&external_glyph_cache[i], 0, sizeof(external_glyph_cache[i]));
+        }
+    }
+}
 
 external_font_t *external_font_create(void) {
     external_font_t *efont = (external_font_t *)malloc(sizeof(external_font_t));
@@ -437,6 +546,8 @@ static int __attribute__((unused)) external_font_load_file_legacy(external_font_
 }
 
 int external_font_load_file(external_font_t *efont, const char *filepath) {
+    if (efont == NULL || filepath == NULL) return -1;
+    external_font_cache_forget(efont);
 #ifndef ESP_PLATFORM
     int result = external_font_load_file_legacy(efont, filepath);
     if (result == 0) external_font_parse_filename(efont, filepath);
@@ -444,7 +555,6 @@ int external_font_load_file(external_font_t *efont, const char *filepath) {
 #else
     FILE *file;
     long file_size;
-    if (efont == NULL || filepath == NULL) return -1;
     external_font_parse_filename(efont, filepath);
     file = fopen(filepath, "rb");
     if (file == NULL) return -1;
@@ -478,6 +588,7 @@ int external_font_load_file(external_font_t *efont, const char *filepath) {
 
 void external_font_free(external_font_t *efont) {
     if (efont != NULL) {
+        external_font_cache_forget(efont);
         if (efont->data != NULL) {
             free(efont->data);
             efont->data = NULL;
@@ -539,23 +650,25 @@ static void draw_external_glyph_raw(const external_font_t *efont, FILE *stream,
     
     int offset = (int)codepoint * efont->bytes_per_glyph;
     int bytes_per_row = (efont->width + 7) / 8;
-    unsigned char glyph[1024];
-    const unsigned char *bitmap = efont->data != NULL ? efont->data + offset : glyph;
-    if (efont->data == NULL &&
-        (stream == NULL || efont->bytes_per_glyph > (int)sizeof(glyph) ||
-         fseek(stream, offset, SEEK_SET) != 0 ||
-         fread(glyph, 1, (size_t)efont->bytes_per_glyph, stream) !=
-             (size_t)efont->bytes_per_glyph)) {
+    const unsigned char *bitmap = efont->data != NULL
+                                      ? efont->data + offset
+                                      : external_font_cached_glyph(efont, stream, codepoint);
+    int row_start = y < 0 ? -y : 0;
+    int row_end = y + efont->height > GFX_HEIGHT ? GFX_HEIGHT - y : efont->height;
+    int col_start = x < 0 ? -x : 0;
+    int col_end = x + draw_w > GFX_WIDTH ? GFX_WIDTH - x : draw_w;
+    if (bitmap == NULL) {
         gfx_draw_rect(fb, x, y, draw_w, efont->height, color);
         return;
     }
     
-    for (int row = 0; row < efont->height; row++) {
-        for (int col = 0; col < draw_w; col++) {
+    if (row_start >= row_end || col_start >= col_end) return;
+    for (int row = row_start; row < row_end; row++) {
+        for (int col = col_start; col < col_end; col++) {
             int byte_index = offset + row * bytes_per_row + col / 8;
             uint8_t byte = bitmap[byte_index - offset];
             if ((byte & (uint8_t)(1u << (7 - (col % 8)))) != 0) {
-                gfx_set_pixel(fb, x + col, y + row, color);
+                fb->pixels[y + row][x + col] = (uint8_t)color;
             }
         }
     }
@@ -589,7 +702,7 @@ void external_font_draw_text(const external_font_t *efont, gfx_framebuffer_t *fb
         return;
     }
     
-    if (efont->data == NULL && (stream = fopen(efont->path, "rb")) == NULL) return;
+    if (efont->data == NULL && (stream = external_font_cached_stream(efont)) == NULL) return;
     while (*cursor != '\0') {
         uint32_t cp;
         if (!font_decode_utf8(&cursor, &cp)) {
@@ -603,7 +716,6 @@ void external_font_draw_text(const external_font_t *efont, gfx_framebuffer_t *fb
         draw_external_glyph_raw(efont, stream, fb, cp, draw_x, y, color);
         draw_x += (cp < 128) ? (efont->width + 1) / 2 : efont->width;
     }
-    if (stream != NULL) fclose(stream);
 }
 
 void external_font_draw_text_aligned(const external_font_t *efont, gfx_framebuffer_t *fb,
@@ -943,7 +1055,7 @@ static void font_draw_text_box_spaced_external(const external_font_t *efont, int
     if (line_height < glyph_height) {
         line_height = glyph_height;
     }
-    if (efont->data == NULL && (stream = fopen(efont->path, "rb")) == NULL) return;
+    if (efont->data == NULL && (stream = external_font_cached_stream(efont)) == NULL) return;
     while (*cursor != '\0' && line_y + glyph_height <= y + height) {
         uint32_t cp;
         int advance;
@@ -967,7 +1079,6 @@ static void font_draw_text_box_spaced_external(const external_font_t *efont, int
         draw_external_glyph_raw(efont, stream, fb, cp, line_x, line_y, color);
         line_x += advance;
     }
-    if (stream != NULL) fclose(stream);
 }
 
 void font_draw_text_box_spaced_auto(int size, gfx_framebuffer_t *fb, int x, int y, int width, int height, const char *text, int line_height, gfx_color_t color) {

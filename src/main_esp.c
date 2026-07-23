@@ -17,12 +17,14 @@
 #include "ui/pages.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 
 static const char *TAG = "ai_mobile";
@@ -36,6 +38,10 @@ static const char *TAG = "ai_mobile";
 #define ESP_SD_APP_CONFIG_PATH ESP_SD_CONFIG_DIRECTORY "/app_state.cfg"
 #define ESP_SD_APP_CONFIG_TEMP ESP_SD_CONFIG_DIRECTORY "/app_state.tmp"
 #define ESP_SD_APP_CONFIG_BACKUP ESP_SD_CONFIG_DIRECTORY "/app_state.bak"
+#define APP_SAVE_DEBOUNCE_MS 1000
+#define APP_SAVE_TASK_STACK_SIZE 6144
+#define APP_SD_BACKUP_SAVE_INTERVAL 10
+#define WIFI_SCAN_TASK_STACK_SIZE 6144
 
 enum {
     SD_LIBRARY_IDLE = 0,
@@ -44,28 +50,138 @@ enum {
     SD_LIBRARY_READY
 };
 
+enum {
+    WIFI_SCAN_IDLE = 0,
+    WIFI_SCAN_RUNNING,
+    WIFI_SCAN_COMPLETE,
+    WIFI_SCAN_FAILED
+};
+
 static volatile int sd_library_state = SD_LIBRARY_IDLE;
 static volatile int sd_library_loaded_count;
 static volatile int sd_library_progress;
 static volatile int sd_library_total_count;
+static app_state_t deferred_save_app;
+static int deferred_save_sd_mounted;
+static int deferred_save_force_sd_backup;
+static TaskHandle_t deferred_save_task_handle;
+static portMUX_TYPE deferred_save_lock = portMUX_INITIALIZER_UNLOCKED;
+static app_state_t wifi_scan_request_app;
+static app_state_t wifi_scan_result_app;
+static volatile int wifi_scan_task_state;
+
+static int save_app_configuration_nvs(const app_state_t *app) {
+    return app_persistence_save_nvs(APP_NVS_NAMESPACE, APP_NVS_KEY, app);
+}
+
+static int backup_app_configuration_sd(const app_state_t *app) {
+    if (app_persistence_save_app_file(ESP_SD_APP_CONFIG_TEMP, app) == 0) {
+        remove(ESP_SD_APP_CONFIG_BACKUP);
+        rename(ESP_SD_APP_CONFIG_PATH, ESP_SD_APP_CONFIG_BACKUP);
+        if (rename(ESP_SD_APP_CONFIG_TEMP, ESP_SD_APP_CONFIG_PATH) != 0) {
+            rename(ESP_SD_APP_CONFIG_BACKUP, ESP_SD_APP_CONFIG_PATH);
+            ESP_LOGW(TAG, "failed to commit app configuration backup to SD");
+            return -1;
+        } else {
+            remove(ESP_SD_APP_CONFIG_BACKUP);
+        }
+        return 0;
+    }
+    ESP_LOGW(TAG, "failed to write app configuration backup to SD");
+    return -1;
+}
 
 static int save_app_configuration(const app_state_t *app, int sd_mounted) {
-    int nvs_result = app_persistence_save_nvs(APP_NVS_NAMESPACE, APP_NVS_KEY, app);
-    if (sd_mounted) {
-        if (app_persistence_save_app_file(ESP_SD_APP_CONFIG_TEMP, app) == 0) {
-            remove(ESP_SD_APP_CONFIG_BACKUP);
-            rename(ESP_SD_APP_CONFIG_PATH, ESP_SD_APP_CONFIG_BACKUP);
-            if (rename(ESP_SD_APP_CONFIG_TEMP, ESP_SD_APP_CONFIG_PATH) != 0) {
-                rename(ESP_SD_APP_CONFIG_BACKUP, ESP_SD_APP_CONFIG_PATH);
-                ESP_LOGW(TAG, "failed to commit app configuration backup to SD");
+    int result = save_app_configuration_nvs(app);
+    if (sd_mounted && backup_app_configuration_sd(app) != 0) {
+        result = -1;
+    }
+    return result;
+}
+
+static void deferred_configuration_save_task(void *context) {
+    app_state_t *snapshot;
+    (void)context;
+    snapshot = heap_caps_malloc(sizeof(*snapshot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (snapshot == NULL) {
+        ESP_LOGE(TAG, "failed to allocate deferred save snapshot");
+        deferred_save_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    while (1) {
+        int result;
+        int force_sd_backup;
+        static int saves_since_sd_backup;
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(APP_SAVE_DEBOUNCE_MS)) > 0) {
+            /* Restart the idle window whenever a newer state arrives. */
+        }
+        taskENTER_CRITICAL(&deferred_save_lock);
+        *snapshot = deferred_save_app;
+        force_sd_backup = deferred_save_force_sd_backup;
+        deferred_save_force_sd_backup = 0;
+        taskEXIT_CRITICAL(&deferred_save_lock);
+
+        result = save_app_configuration_nvs(snapshot);
+        saves_since_sd_backup++;
+        if (deferred_save_sd_mounted &&
+            sd_library_state != SD_LIBRARY_LOADING &&
+            (force_sd_backup ||
+             saves_since_sd_backup >= APP_SD_BACKUP_SAVE_INTERVAL)) {
+            if (backup_app_configuration_sd(snapshot) != 0) {
+                result = -1;
             } else {
-                remove(ESP_SD_APP_CONFIG_BACKUP);
+                saves_since_sd_backup = 0;
             }
-        } else {
-            ESP_LOGW(TAG, "failed to write app configuration backup to SD");
+        }
+        if (result != 0) {
+            ESP_LOGW(TAG, "background app state save failed; retrying");
+            taskENTER_CRITICAL(&deferred_save_lock);
+            if (force_sd_backup) {
+                deferred_save_force_sd_backup = 1;
+            }
+            taskEXIT_CRITICAL(&deferred_save_lock);
+            xTaskNotifyGive(deferred_save_task_handle);
         }
     }
-    return nvs_result;
+}
+
+static int start_deferred_configuration_save_task(int sd_mounted) {
+    deferred_save_sd_mounted = sd_mounted;
+    if (xTaskCreatePinnedToCore(deferred_configuration_save_task, "app_save",
+                                APP_SAVE_TASK_STACK_SIZE, NULL,
+                                tskIDLE_PRIORITY + 1,
+                                &deferred_save_task_handle, 0) != pdPASS) {
+        deferred_save_task_handle = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+static void schedule_app_configuration_save_with_backup(const app_state_t *app,
+                                                        int force_sd_backup) {
+    if (app == NULL) return;
+    if (deferred_save_task_handle == NULL) {
+        if (save_app_configuration(
+                app,
+                deferred_save_sd_mounted && sd_library_state != SD_LIBRARY_LOADING) != 0) {
+            ESP_LOGW(TAG, "synchronous fallback app state save failed");
+        }
+        return;
+    }
+    taskENTER_CRITICAL(&deferred_save_lock);
+    deferred_save_app = *app;
+    if (force_sd_backup) {
+        deferred_save_force_sd_backup = 1;
+    }
+    taskEXIT_CRITICAL(&deferred_save_lock);
+    xTaskNotifyGive(deferred_save_task_handle);
+}
+
+static void schedule_app_configuration_save(const app_state_t *app) {
+    schedule_app_configuration_save_with_backup(app, 0);
 }
 
 static int persisted_app_state_changed(const app_state_t *previous,
@@ -190,7 +306,7 @@ static int present_home_selection_change(esp_display_t *display,
                                     dirty_bottom - dirty_y + padding * 2) != 0) {
         return -1;
     }
-    ESP_LOGI(TAG, "home selection partial refresh: %d -> %d",
+    ESP_LOGD(TAG, "home selection partial refresh: %d -> %d",
              previous_selection, current_selection);
     return 0;
 }
@@ -808,6 +924,46 @@ static void refresh_wifi_networks(app_state_t *app) {
     if (count < 0) ESP_LOGW(TAG, "Wi-Fi scan failed");
 }
 
+static void wifi_scan_task(void *context) {
+    (void)context;
+    wifi_scan_result_app = wifi_scan_request_app;
+    refresh_wifi_networks(&wifi_scan_result_app);
+    wifi_scan_task_state = WIFI_SCAN_COMPLETE;
+    vTaskDelete(NULL);
+}
+
+static int start_wifi_scan(const app_state_t *app) {
+    if (app == NULL || wifi_scan_task_state == WIFI_SCAN_RUNNING) {
+        return -1;
+    }
+    wifi_scan_request_app = *app;
+    wifi_scan_task_state = WIFI_SCAN_RUNNING;
+    if (xTaskCreate(wifi_scan_task, "wifi_scan", WIFI_SCAN_TASK_STACK_SIZE,
+                    NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
+        wifi_scan_task_state = WIFI_SCAN_FAILED;
+        return -1;
+    }
+    return 0;
+}
+
+static void apply_wifi_scan_result(app_state_t *app) {
+    if (app == NULL) return;
+    snprintf(app->wifi_ip, sizeof(app->wifi_ip), "%s", wifi_scan_result_app.wifi_ip);
+    memcpy(app->wifi_saved_ssids, wifi_scan_result_app.wifi_saved_ssids,
+           sizeof(app->wifi_saved_ssids));
+    app->wifi_saved_count = wifi_scan_result_app.wifi_saved_count;
+    memcpy(app->wifi_network_ssids, wifi_scan_result_app.wifi_network_ssids,
+           sizeof(app->wifi_network_ssids));
+    memcpy(app->wifi_network_rssi, wifi_scan_result_app.wifi_network_rssi,
+           sizeof(app->wifi_network_rssi));
+    memcpy(app->wifi_network_secure, wifi_scan_result_app.wifi_network_secure,
+           sizeof(app->wifi_network_secure));
+    app->wifi_network_count = wifi_scan_result_app.wifi_network_count;
+    app->wifi_network_selection = wifi_scan_result_app.wifi_network_selection;
+    app->wifi_scan_in_progress = 0;
+    app->wifi_scan_requested = 0;
+}
+
 void app_main(void) {
     app_state_t app;
     gfx_framebuffer_t *fb;
@@ -874,6 +1030,9 @@ void app_main(void) {
     gfx_init(fb);
     esp_display_init(&display);
     esp_input_init(&input);
+    if (start_deferred_configuration_save_task(sd_mounted) != 0) {
+        ESP_LOGW(TAG, "background app state save unavailable; using synchronous fallback");
+    }
 
     if (!font_load_default(&font)) {
         ESP_LOGE(TAG, "failed to load built-in bitmap font");
@@ -907,6 +1066,28 @@ void app_main(void) {
 
     while (1) {
         app_button_t button;
+        int button_repeat_count = 1;
+        if (wifi_scan_task_state == WIFI_SCAN_COMPLETE ||
+            wifi_scan_task_state == WIFI_SCAN_FAILED) {
+            int scan_succeeded = wifi_scan_task_state == WIFI_SCAN_COMPLETE;
+            wifi_scan_task_state = WIFI_SCAN_IDLE;
+            if (scan_succeeded) {
+                apply_wifi_scan_result(&app);
+                ESP_LOGI(TAG, "background Wi-Fi scan complete: %d network(s)",
+                         app.wifi_saved_count + app.wifi_network_count);
+            } else {
+                app.wifi_scan_in_progress = 0;
+                app.wifi_scan_requested = 0;
+                ESP_LOGW(TAG, "background Wi-Fi scan task failed");
+            }
+            if (app.page == APP_PAGE_WIFI_SETUP) {
+                ui_render_page(fb, &app, &font);
+                if (esp_display_present_partial(&display, fb, 0, 40,
+                                                GFX_WIDTH, GFX_HEIGHT - 40) != 0) {
+                    ESP_LOGW(TAG, "failed to show Wi-Fi scan result");
+                }
+            }
+        }
         if (sd_library_state == SD_LIBRARY_COMPLETE) {
             sd_library_state = SD_LIBRARY_READY;
             app.reader_library_loading = 0;
@@ -918,9 +1099,7 @@ void app_main(void) {
                 ESP_LOGI(TAG, "restored reading progress from SD after background indexing");
             }
             app_sync_reader_library(&app);
-            if (save_app_configuration(&app, sd_mounted) != 0) {
-                ESP_LOGW(TAG, "failed to persist restored library state");
-            }
+            schedule_app_configuration_save(&app);
             ESP_LOGI(TAG, "background indexing complete: loaded %d TXT/EPUB book(s) from %s",
                      sd_library_loaded_count, ESP_SD_BOOK_DIRECTORY);
             if (app.page == APP_PAGE_BOOKSHELF) {
@@ -953,9 +1132,7 @@ void app_main(void) {
             app.reader_background_pagination_progress = 100;
             if (commit_result > 0) {
                 app_finish_background_pagination(&app, completed_book);
-                if (save_app_configuration(&app, sd_mounted) != 0) {
-                    ESP_LOGW(TAG, "failed to save state after background pagination");
-                }
+                schedule_app_configuration_save(&app);
                 ESP_LOGI(TAG, "background pagination complete for book %d", completed_book);
                 if (app.page == APP_PAGE_READER && app.current_book == completed_book) {
                     ui_render_page(fb, &app, &font);
@@ -990,20 +1167,20 @@ void app_main(void) {
                     app.current_book != reader_pagination_book_index)) {
             app.reader_background_pagination_active = 0;
         }
-        if (esp_input_poll_button(&input, &button)) {
+        if (esp_input_poll_button_batch(&input, &button, &button_repeat_count)) {
             app_state_t previous_app = app;
             app_page_t previous_page = previous_app.page;
             int previous_home_selection = previous_app.home_selection;
             int partial_home_selection;
             int button_state_changed;
             int persistence_changed;
+            int64_t button_started_us = esp_timer_get_time();
+            int64_t render_time_us = 0;
+            int64_t display_time_us = 0;
             reader_pagination_progress_t button_pagination_progress = {fb, &display, -100};
-            ESP_LOGI(TAG, "button event %d on page %s", button, app_page_name(app.page));
+            ESP_LOGD(TAG, "button event %d on page %s", button, app_page_name(app.page));
             if (button == APP_BUTTON_POWER_LONG) {
-                if (sd_library_state != SD_LIBRARY_LOADING &&
-                    save_app_configuration(&app, sd_mounted) != 0) {
-                    ESP_LOGW(TAG, "failed to save app state before display sleep");
-                }
+                schedule_app_configuration_save_with_backup(&app, 1);
                 esp_display_sleep(&display);
                 continue;
             }
@@ -1017,7 +1194,9 @@ void app_main(void) {
                 reader_library_set_progress_callback(present_reader_pagination_progress,
                                                       &button_pagination_progress);
             }
-            app_handle_button(&app, button);
+            for (int repeat = 0; repeat < button_repeat_count; repeat++) {
+                app_handle_button(&app, button);
+            }
             if (sd_library_state != SD_LIBRARY_LOADING) {
                 reader_library_set_progress_callback(NULL, NULL);
             }
@@ -1027,13 +1206,23 @@ void app_main(void) {
                 app.wifi_scan_requested = 1;
             }
             if (app.page == APP_PAGE_WIFI_SETUP && app.wifi_scan_requested) {
-                app.wifi_scan_in_progress = 1;
-                ui_render_page(fb, &app, &font);
-                if (esp_display_present_partial(&display, fb, 0, 40,
-                                                GFX_WIDTH, GFX_HEIGHT - 40) != 0) {
-                    ESP_LOGW(TAG, "failed to show Wi-Fi scan progress");
+                if (wifi_scan_task_state == WIFI_SCAN_RUNNING) {
+                    app.wifi_scan_requested = 0;
+                    app.wifi_scan_in_progress = 1;
+                    ESP_LOGD(TAG, "Wi-Fi scan already running");
+                } else {
+                    app.wifi_scan_in_progress = 1;
+                    app.wifi_scan_requested = 0;
+                    ui_render_page(fb, &app, &font);
+                    if (esp_display_present_partial(&display, fb, 0, 40,
+                                                    GFX_WIDTH, GFX_HEIGHT - 40) != 0) {
+                        ESP_LOGW(TAG, "failed to show Wi-Fi scan progress");
+                    }
+                    if (start_wifi_scan(&app) != 0) {
+                        app.wifi_scan_in_progress = 0;
+                        wifi_scan_task_state = WIFI_SCAN_FAILED;
+                    }
                 }
-                refresh_wifi_networks(&app);
             }
             if (app.wifi_config_save_requested) {
                 app.wifi_config_save_requested = 0;
@@ -1066,7 +1255,10 @@ void app_main(void) {
             persistence_changed = persisted_app_state_changed(&previous_app, &app);
             if (button_state_changed) {
                 int present_result;
+                int64_t phase_started_us = esp_timer_get_time();
                 ui_render_page(fb, &app, &font);
+                render_time_us = esp_timer_get_time() - phase_started_us;
+                phase_started_us = esp_timer_get_time();
                 if (partial_home_selection) {
                     present_result = present_home_selection_change(
                         &display, fb, previous_home_selection, app.home_selection);
@@ -1085,6 +1277,7 @@ void app_main(void) {
                     esp_display_present(&display, fb) != 0) {
                     ESP_LOGE(TAG, "failed to present button frame");
                 }
+                display_time_us = esp_timer_get_time() - phase_started_us;
             } else {
                 ESP_LOGD(TAG, "button produced no visible state change; skipped refresh");
             }
@@ -1094,9 +1287,9 @@ void app_main(void) {
             if (sd_library_state == SD_LIBRARY_LOADING) {
                 ESP_LOGD(TAG, "deferred state save until book library is ready");
             } else if (persistence_changed) {
-                if (save_app_configuration(&app, sd_mounted) != 0) {
-                    ESP_LOGW(TAG, "failed to save app state to NVS");
-                }
+                schedule_app_configuration_save(&app);
+                ESP_LOGD(TAG, "scheduled app state save after %d ms idle",
+                         APP_SAVE_DEBOUNCE_MS);
             } else {
                 ESP_LOGD(TAG, "skipped persistence for transient UI state");
             }
@@ -1108,20 +1301,24 @@ void app_main(void) {
                 layout_applied = app_apply_pending_reader_layout(&app);
                 reader_library_set_progress_callback(NULL, NULL);
                 if (layout_applied) {
-                ESP_LOGI(TAG, "reader layout re-pagination complete");
-                if (save_app_configuration(&app, sd_mounted) != 0) {
-                    ESP_LOGW(TAG, "failed to save reading position after re-pagination");
-                }
-                ui_render_page(fb, &app, &font);
-                if (esp_display_present_partial(&display, fb, 0, 32,
-                                                GFX_WIDTH, GFX_HEIGHT - 32) != 0) {
-                    ESP_LOGE(TAG, "failed to present re-paginated reader frame");
-                }
+                    ESP_LOGI(TAG, "reader layout re-pagination complete");
+                    schedule_app_configuration_save(&app);
+                    ui_render_page(fb, &app, &font);
+                    if (esp_display_present_partial(&display, fb, 0, 32,
+                                                    GFX_WIDTH, GFX_HEIGHT - 32) != 0) {
+                        ESP_LOGE(TAG, "failed to present re-paginated reader frame");
+                    }
                 }
             }
             if (app.page == APP_PAGE_READER) {
                 start_reader_background_pagination(app.current_book);
             }
+            ESP_LOGI(TAG,
+                     "button performance: event=%d repeats=%d render=%lldms display=%lldms total=%lldms",
+                     (int)button, button_repeat_count,
+                     (long long)(render_time_us / 1000),
+                     (long long)(display_time_us / 1000),
+                     (long long)((esp_timer_get_time() - button_started_us) / 1000));
         }
         {
             int connected = esp_time_sync_wifi_connected();
