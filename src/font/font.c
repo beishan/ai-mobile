@@ -1,4 +1,5 @@
 #include "font/font.h"
+#include "platform/storage_io.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -325,6 +326,7 @@ static FILE *external_font_cached_stream(const external_font_t *efont) {
             replacement = i;
         }
     }
+    storage_io_lock(STORAGE_IO_FOREGROUND);
     if (external_stream_cache[replacement].stream != NULL) {
         fclose(external_stream_cache[replacement].stream);
     }
@@ -332,6 +334,7 @@ static FILE *external_font_cached_stream(const external_font_t *efont) {
     external_stream_cache[replacement].font =
         external_stream_cache[replacement].stream != NULL ? efont : NULL;
     external_stream_cache[replacement].used_at = ++external_cache_clock;
+    storage_io_unlock();
     return external_stream_cache[replacement].stream;
 }
 
@@ -357,12 +360,15 @@ static const unsigned char *external_font_cached_glyph(const external_font_t *ef
         }
     }
     offset = (int)codepoint * efont->bytes_per_glyph;
+    storage_io_lock(STORAGE_IO_FOREGROUND);
     if (stream == NULL || fseek(stream, offset, SEEK_SET) != 0 ||
         fread(external_glyph_cache[replacement].bitmap, 1,
               (size_t)efont->bytes_per_glyph, stream) !=
             (size_t)efont->bytes_per_glyph) {
+        storage_io_unlock();
         return NULL;
     }
+    storage_io_unlock();
     external_glyph_cache[replacement].font = efont;
     external_glyph_cache[replacement].codepoint = codepoint;
     external_glyph_cache[replacement].byte_count = efont->bytes_per_glyph;
@@ -373,9 +379,11 @@ static const unsigned char *external_font_cached_glyph(const external_font_t *ef
 static void external_font_cache_forget(const external_font_t *efont) {
     for (int i = 0; i < EXTERNAL_FONT_STREAM_CACHE_SIZE; i++) {
         if (external_stream_cache[i].font == efont) {
+            storage_io_lock(STORAGE_IO_FOREGROUND);
             if (external_stream_cache[i].stream != NULL) {
                 fclose(external_stream_cache[i].stream);
             }
+            storage_io_unlock();
             memset(&external_stream_cache[i], 0, sizeof(external_stream_cache[i]));
         }
     }

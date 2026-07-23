@@ -14,6 +14,7 @@
 #include "platform/esp_time_sync.h"
 #include "platform/esp_web_admin.h"
 #include "platform/esp_weather.h"
+#include "platform/storage_io.h"
 #include "ui/pages.h"
 
 #include <stdio.h>
@@ -42,6 +43,7 @@ static const char *TAG = "ai_mobile";
 #define APP_SAVE_TASK_STACK_SIZE 6144
 #define APP_SD_BACKUP_SAVE_INTERVAL 10
 #define WIFI_SCAN_TASK_STACK_SIZE 6144
+#define PAGE_PREFETCH_TASK_STACK_SIZE 4096
 
 enum {
     SD_LIBRARY_IDLE = 0,
@@ -69,26 +71,35 @@ static portMUX_TYPE deferred_save_lock = portMUX_INITIALIZER_UNLOCKED;
 static app_state_t wifi_scan_request_app;
 static app_state_t wifi_scan_result_app;
 static volatile int wifi_scan_task_state;
+static TaskHandle_t page_prefetch_task_handle;
+static int page_prefetch_book;
+static int page_prefetch_page;
+static portMUX_TYPE page_prefetch_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static int save_app_configuration_nvs(const app_state_t *app) {
     return app_persistence_save_nvs(APP_NVS_NAMESPACE, APP_NVS_KEY, app);
 }
 
 static int backup_app_configuration_sd(const app_state_t *app) {
+    int result = -1;
+    storage_io_lock(STORAGE_IO_BACKGROUND);
     if (app_persistence_save_app_file(ESP_SD_APP_CONFIG_TEMP, app) == 0) {
         remove(ESP_SD_APP_CONFIG_BACKUP);
         rename(ESP_SD_APP_CONFIG_PATH, ESP_SD_APP_CONFIG_BACKUP);
         if (rename(ESP_SD_APP_CONFIG_TEMP, ESP_SD_APP_CONFIG_PATH) != 0) {
             rename(ESP_SD_APP_CONFIG_BACKUP, ESP_SD_APP_CONFIG_PATH);
             ESP_LOGW(TAG, "failed to commit app configuration backup to SD");
-            return -1;
+            goto done;
         } else {
             remove(ESP_SD_APP_CONFIG_BACKUP);
         }
-        return 0;
+        result = 0;
+        goto done;
     }
     ESP_LOGW(TAG, "failed to write app configuration backup to SD");
-    return -1;
+done:
+    storage_io_unlock();
+    return result;
 }
 
 static int save_app_configuration(const app_state_t *app, int sd_mounted) {
@@ -964,6 +975,40 @@ static void apply_wifi_scan_result(app_state_t *app) {
     app->wifi_scan_requested = 0;
 }
 
+static void page_prefetch_task(void *context) {
+    (void)context;
+    while (1) {
+        int book_index;
+        int page_index;
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        taskENTER_CRITICAL(&page_prefetch_lock);
+        book_index = page_prefetch_book;
+        page_index = page_prefetch_page;
+        taskEXIT_CRITICAL(&page_prefetch_lock);
+        reader_library_prefetch_adjacent_pages(book_index, page_index);
+    }
+}
+
+static int start_page_prefetch_task(void) {
+    if (xTaskCreatePinnedToCore(page_prefetch_task, "page_prefetch",
+                                PAGE_PREFETCH_TASK_STACK_SIZE, NULL,
+                                tskIDLE_PRIORITY + 1,
+                                &page_prefetch_task_handle, 0) != pdPASS) {
+        page_prefetch_task_handle = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+static void schedule_page_prefetch(int book_index, int page_index) {
+    if (page_prefetch_task_handle == NULL) return;
+    taskENTER_CRITICAL(&page_prefetch_lock);
+    page_prefetch_book = book_index;
+    page_prefetch_page = page_index;
+    taskEXIT_CRITICAL(&page_prefetch_lock);
+    xTaskNotifyGive(page_prefetch_task_handle);
+}
+
 void app_main(void) {
     app_state_t app;
     gfx_framebuffer_t *fb;
@@ -990,6 +1035,7 @@ void app_main(void) {
              (unsigned int)sizeof(*fb));
 
     init_nvs_storage();
+    storage_io_init();
     sd_mounted = esp_sd_init(&sd) == 0;
     if (sd_mounted) {
         int font_count = font_manager_load_dir(ESP_SD_FONT_DIRECTORY);
@@ -1032,6 +1078,9 @@ void app_main(void) {
     esp_input_init(&input);
     if (start_deferred_configuration_save_task(sd_mounted) != 0) {
         ESP_LOGW(TAG, "background app state save unavailable; using synchronous fallback");
+    }
+    if (start_page_prefetch_task() != 0) {
+        ESP_LOGW(TAG, "reader page prefetch task unavailable");
     }
 
     if (!font_load_default(&font)) {
@@ -1140,6 +1189,7 @@ void app_main(void) {
                                                     GFX_WIDTH, GFX_HEIGHT - 32) != 0) {
                         ESP_LOGW(TAG, "failed to refresh reader after background pagination");
                     }
+                    schedule_page_prefetch(app.current_book, app.reader_page);
                 }
             } else if (commit_result < 0) {
                 ESP_LOGW(TAG, "background pagination result was discarded");
@@ -1312,6 +1362,7 @@ void app_main(void) {
             }
             if (app.page == APP_PAGE_READER) {
                 start_reader_background_pagination(app.current_book);
+                schedule_page_prefetch(app.current_book, app.reader_page);
             }
             ESP_LOGI(TAG,
                      "button performance: event=%d repeats=%d render=%lldms display=%lldms total=%lldms",

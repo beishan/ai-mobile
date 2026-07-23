@@ -13,6 +13,7 @@ idf_component_register(
         "platform/epd_frame.c"
         "platform/ssd1677.c"
         "platform/input_debounce.c"
+        "platform/storage_io.c"
         "platform/esp_display.c"
         "platform/esp_input.c"
         "platform/esp_sd.c"

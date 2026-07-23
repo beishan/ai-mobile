@@ -40,6 +40,7 @@ void reader_library_set_progress_callback(reader_library_progress_callback_t cal
                                           void *context);
 int reader_library_is_truncated(int book_index);
 const char *reader_library_page_text(int book_index, int page_index);
+void reader_library_prefetch_adjacent_pages(int book_index, int page_index);
 const char *reader_library_chapter_title(int book_index, int chapter_index);
 int reader_library_chapter_page(int book_index, int chapter_index);
 int reader_library_chapter_count(int book_index);
