@@ -7,7 +7,7 @@
 
 | 功能 | ESP32-S3 GPIO | PCB 网络名 |
 |---|---:|---|
-| 墨水屏忙信号 BUSY_N | 4 | EPD_BUSY |
+| 墨水屏忙信号 BUSY | 4 | EPD_BUSY |
 | 墨水屏片选 | 5 | EPD_CS |
 | SD 卡片选 | 13 | SD_CS |
 | 墨水屏命令/数据选择 | 15 | EPD_DC |
@@ -38,7 +38,7 @@ J3 使用 Hirose FH12-24S-0.5SH 类下接点连接器，安装在 PCB 背面，�
 | 6 | GND | GND |
 | 7 | GND | GND |
 | 8 | BS | 接 GND，选择四线 SPI 模式 |
-| 9 | BUSY_N | GPIO4 / EPD_BUSY，低电平表示忙 |
+| 9 | BUSY | GPIO4 / EPD_BUSY，当前实机模组高电平表示忙 |
 | 10 | RST_N | GPIO16 / EPD_RST |
 | 11 | DC | GPIO15 / EPD_DC |
 | 12 | CSB | GPIO5 / EPD_CS |

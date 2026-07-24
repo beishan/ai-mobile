@@ -31,7 +31,7 @@
 
 /*
  * 墨水屏 -> ESP32-S3 接线：
- *   BUSY_N -> GPIO4：屏幕输出，主控输入；低电平表示控制器忙
+ *   BUSY -> GPIO4：屏幕输出，主控输入；当前实机模组高电平表示控制器忙
  *   RST  -> GPIO16 ：主控输出，低电平硬件复位；不要接开发板 RST 排针
  *   DC   -> GPIO15 ：主控输出，0=命令，1=数据
  *   CS   -> GPIO5  ：主控输出，低电平选中墨水屏
@@ -48,7 +48,7 @@
 #define ESP_EPD_PIN_CS 5     /* MCU -> EPD：独立片选，低有效 */
 #define ESP_EPD_PIN_SCK 18   /* MCU -> EPD/SD：共享 SPI 时钟 */
 #define ESP_EPD_PIN_SDA 17   /* MCU -> EPD/SD：共享 SPI MOSI */
-#define ESP_EPD_BUSY_ACTIVE_LEVEL 0 /* OSPTEK 24Pin 排线标为 BUSY_N，低有效 */
+#define ESP_EPD_BUSY_ACTIVE_LEVEL 1 /* 与已点亮的 ping_test 实机配置一致：高电平忙 */
 
 /*
  * ----------------------------------------------------------------

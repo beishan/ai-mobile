@@ -56,6 +56,7 @@ static int esp_display_configure_gpio(void) {
 }
 
 static int esp_display_configure_spi(esp_display_t *display) {
+    size_t shared_bus_max_transfer = 0;
     spi_bus_config_t bus = {
         .mosi_io_num = ESP_EPD_PIN_SDA,
         .miso_io_num = ESP_SD_PIN_MISO,
@@ -70,10 +71,18 @@ static int esp_display_configure_spi(esp_display_t *display) {
         .spics_io_num = ESP_EPD_PIN_CS,
         .queue_size = 1
     };
-    esp_err_t err = spi_bus_initialize(ESP_EPD_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "failed to initialize EPD SPI bus: %s", esp_err_to_name(err));
-        return -1;
+    esp_err_t err;
+
+    if (spi_bus_get_max_transaction_len(ESP_EPD_SPI_HOST,
+                                        &shared_bus_max_transfer) == ESP_OK) {
+        ESP_LOGI(TAG, "reusing shared SPI bus (max transfer=%u bytes)",
+                 (unsigned int)shared_bus_max_transfer);
+    } else {
+        err = spi_bus_initialize(ESP_EPD_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "failed to initialize EPD SPI bus: %s", esp_err_to_name(err));
+            return -1;
+        }
     }
 
     err = spi_bus_add_device(ESP_EPD_SPI_HOST, &device, &display->spi);
@@ -115,9 +124,15 @@ void esp_display_init(esp_display_t *display) {
     if (esp_display_configure_gpio() == 0 && esp_display_configure_spi(display) == 0) {
         display->hardware_ready = 1;
         ESP_LOGI(TAG, "EPD GPIO and SPI bus initialized");
-        if (esp_display_reset(display) != 0 || esp_display_wait_busy(display, ESP_EPD_BUSY_TIMEOUT_MS) != 0) {
+        /*
+         * Do not wait for BUSY immediately after the hardware reset.  A panel
+         * waking from deep sleep may keep BUSY active until it receives the
+         * SSD1677 software-reset command (0x12).  ssd1677_init() sends that
+         * command first and then performs the required BUSY wait.
+         */
+        if (esp_display_reset(display) != 0) {
             display->hardware_ready = 0;
-            ESP_LOGW(TAG, "EPD basic reset/busy handshake failed");
+            ESP_LOGW(TAG, "EPD hardware reset failed");
         } else {
             ssd1677_io_t io = {
                 .context = display,
@@ -154,17 +169,24 @@ int esp_display_reset(esp_display_t *display) {
 
 int esp_display_wait_busy(esp_display_t *display, int timeout_ms) {
     int elapsed_ms = 0;
+    int initial_level;
     if (display == NULL || !display->hardware_ready) {
         return -1;
     }
+    initial_level = gpio_get_level(ESP_EPD_PIN_BUSY);
+    ESP_LOGI(TAG, "EPD BUSY wait: level=%d active=%d timeout=%dms",
+             initial_level, ESP_EPD_BUSY_ACTIVE_LEVEL, timeout_ms);
     while (gpio_get_level(ESP_EPD_PIN_BUSY) == ESP_EPD_BUSY_ACTIVE_LEVEL) {
         if (elapsed_ms >= timeout_ms) {
-            ESP_LOGE(TAG, "EPD busy timeout after %d ms", timeout_ms);
+            ESP_LOGE(TAG, "EPD BUSY timeout after %dms (level=%d)",
+                     timeout_ms, gpio_get_level(ESP_EPD_PIN_BUSY));
             return -1;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
         elapsed_ms += 10;
     }
+    ESP_LOGI(TAG, "EPD BUSY ready after %dms (level=%d)",
+             elapsed_ms, gpio_get_level(ESP_EPD_PIN_BUSY));
     return 0;
 }
 
