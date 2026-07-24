@@ -8,6 +8,7 @@ idf_component_register(
         "app/reader_library.c"
         "app/epub_reader.c"
         "ui/pages.c"
+        "ui/page_simple.c"
         "ui/icons.c"
         "font/font.c"
         "platform/epd_frame.c"

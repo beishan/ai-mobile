@@ -128,6 +128,7 @@
 #define ESP_EPD_BUSY_TIMEOUT_MS 60000   /* 全刷最长等待：60 秒 */
 #define ESP_EPD_PARTIAL_REFRESH_LIMIT 24 /* 小面积局刷硬上限；大面积刷新按累计面积更早全刷 */
 #define ESP_EPD_PARTIAL_AREA_SCREENS 3  /* 累计刷新约 3 个整屏面积后自动消残影 */
+#define ESP_EPD_AUTO_FULL_AREA_PERCENT 70 /* 自动帧差包围区达到整屏 70% 时直接全刷 */
 
 /* 仅用于启动日志显示；实际供电必须接开发板 3V3 和 GND。 */
 #define ESP_EPD_POWER_GND "GND"

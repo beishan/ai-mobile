@@ -396,10 +396,20 @@ parsed_ok:
         }
     }
     {
-        int extra = 0;
-        if (sscanf(buffer + consumed, "system_font_name=%63[^\n]\n%n",
-                   parsed.system_font_name, &extra) == 1) {
-            consumed += extra;
+        static const char prefix[] = "system_font_name=";
+        const char *line = buffer + consumed;
+        if (strncmp(line, prefix, sizeof(prefix) - 1) == 0) {
+            const char *value = line + sizeof(prefix) - 1;
+            const char *newline = strchr(value, '\n');
+            if (newline != NULL) {
+                size_t length = (size_t)(newline - value);
+                if (length >= sizeof(parsed.system_font_name)) {
+                    length = sizeof(parsed.system_font_name) - 1;
+                }
+                memcpy(parsed.system_font_name, value, length);
+                parsed.system_font_name[length] = '\0';
+                consumed = (int)(newline - buffer) + 1;
+            }
         }
     }
     {

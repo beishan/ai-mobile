@@ -6,6 +6,11 @@
 
 static int suppress_system_font;
 
+static int draw_external_glyph_scaled(const external_font_t *efont,
+                                      gfx_framebuffer_t *fb, uint32_t codepoint,
+                                      int x, int y, int target_size,
+                                      gfx_color_t color);
+
 static const external_font_t *system_font_for_size(int size) {
     const external_font_t *font;
     int diff;
@@ -15,6 +20,10 @@ static const external_font_t *system_font_for_size(int size) {
     diff = (font->nominal_size > 0 ? font->nominal_size : font->height) - size;
     if (diff < 0) diff = -diff;
     return diff <= 4 ? font : NULL;
+}
+
+static const external_font_t *fallback_font_for_size(int size) {
+    return font_manager_get(size);
 }
 #include <stdlib.h>
 #include <stdio.h>
@@ -133,6 +142,18 @@ const font_glyph_t *font_find_glyph(const font_face_t *font, uint32_t codepoint)
     return NULL;
 }
 
+static int font_codepoint_advance(const font_face_t *font, uint32_t codepoint) {
+    const font_glyph_t *glyph = font_find_glyph(font, codepoint);
+    const external_font_t *fallback;
+    if (glyph != NULL) return glyph->advance;
+    fallback = fallback_font_for_size(font != NULL ? font->size : 16);
+    if (fallback != NULL) {
+        int size = font != NULL ? font->size : 16;
+        return codepoint < 128 ? (size + 1) / 2 : size;
+    }
+    return font != NULL ? font->size : 16;
+}
+
 int font_measure_text(const font_face_t *font, const char *text) {
     const unsigned char *cursor = (const unsigned char *)text;
     int width = 0;
@@ -146,8 +167,7 @@ int font_measure_text(const font_face_t *font, const char *text) {
         if (cp == '\n') {
             break;
         }
-        const font_glyph_t *glyph = font_find_glyph(font, cp);
-        width += glyph != NULL ? glyph->advance : (font != NULL ? font->size : 16);
+        width += font_codepoint_advance(font, cp);
     }
     return width;
 }
@@ -200,8 +220,13 @@ void font_draw_text(const font_face_t *font, gfx_framebuffer_t *fb, int x, int y
             draw_glyph_bitmap(font, fb, glyph, draw_x, y, color);
             draw_x += glyph->advance;
         } else {
-            draw_replacement(font, fb, draw_x, y, color);
-            draw_x += font->size;
+            const external_font_t *fallback = fallback_font_for_size(font->size);
+            if (fallback == NULL ||
+                !draw_external_glyph_scaled(fallback, fb, cp, draw_x, y,
+                                            font->size, color)) {
+                draw_replacement(font, fb, draw_x, y, color);
+            }
+            draw_x += font_codepoint_advance(font, cp);
         }
     }
 }
@@ -235,8 +260,7 @@ void font_draw_ellipsis(const font_face_t *font, gfx_framebuffer_t *fb, int x, i
         const unsigned char *before = cursor;
         uint32_t cp;
         font_decode_utf8(&cursor, &cp);
-        const font_glyph_t *glyph = font_find_glyph(font, cp);
-        int advance = glyph != NULL ? glyph->advance : font->size;
+        int advance = font_codepoint_advance(font, cp);
         if (used + advance + ellipsis_width > width) {
             break;
         }
@@ -268,8 +292,7 @@ void font_draw_text_box_spaced(const font_face_t *font, gfx_framebuffer_t *fb, i
             line_y += line_height;
             continue;
         }
-        const font_glyph_t *glyph = font_find_glyph(font, cp);
-        int advance = glyph != NULL ? glyph->advance : font->size;
+        int advance = font_codepoint_advance(font, cp);
         if (line_x > x && line_x + advance > x + width) {
             line_x = x;
             line_y += line_height;
@@ -680,6 +703,51 @@ static void draw_external_glyph_raw(const external_font_t *efont, FILE *stream,
             }
         }
     }
+}
+
+static int draw_external_glyph_scaled(const external_font_t *efont,
+                                      gfx_framebuffer_t *fb, uint32_t codepoint,
+                                      int x, int y, int target_size,
+                                      gfx_color_t color) {
+    FILE *stream = NULL;
+    const unsigned char *bitmap;
+    int total_glyphs;
+    int source_width;
+    int target_width;
+    int bytes_per_row;
+
+    if (efont == NULL || !efont->loaded || fb == NULL || target_size <= 0) {
+        return 0;
+    }
+    total_glyphs = efont->data_size / efont->bytes_per_glyph;
+    if ((int)codepoint >= total_glyphs) return 0;
+    if (efont->data == NULL && (stream = external_font_cached_stream(efont)) == NULL) {
+        return 0;
+    }
+    bitmap = efont->data != NULL
+                 ? efont->data + (int)codepoint * efont->bytes_per_glyph
+                 : external_font_cached_glyph(efont, stream, codepoint);
+    if (bitmap == NULL) return 0;
+
+    source_width = codepoint < 128 ? (efont->width + 1) / 2 : efont->width;
+    target_width = codepoint < 128 ? (target_size + 1) / 2 : target_size;
+    bytes_per_row = (efont->width + 7) / 8;
+    for (int target_y = 0; target_y < target_size; target_y++) {
+        int draw_y = y + target_y;
+        int source_y = target_y * efont->height / target_size;
+        if (draw_y < 0 || draw_y >= GFX_HEIGHT) continue;
+        for (int target_x = 0; target_x < target_width; target_x++) {
+            int draw_x = x + target_x;
+            int source_x = target_x * source_width / target_width;
+            uint8_t byte;
+            if (draw_x < 0 || draw_x >= GFX_WIDTH) continue;
+            byte = bitmap[source_y * bytes_per_row + source_x / 8];
+            if ((byte & (uint8_t)(1u << (7 - (source_x % 8)))) != 0) {
+                fb->pixels[draw_y][draw_x] = (uint8_t)color;
+            }
+        }
+    }
+    return 1;
 }
 
 int external_font_measure_text(const external_font_t *efont, const char *text) {

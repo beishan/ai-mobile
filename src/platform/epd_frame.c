@@ -62,3 +62,53 @@ int epd_frame_pack_partial(const gfx_framebuffer_t *fb, epd_frame_t *frame,
     }
     return 0;
 }
+
+int epd_frame_diff_bounds(const epd_frame_t *previous, const epd_frame_t *current,
+                          int *native_x, int *native_y,
+                          int *native_width, int *native_height,
+                          size_t *changed_bytes) {
+    const int row_bytes = SSD1677_PANEL_WIDTH / 8;
+    int min_byte_x = row_bytes;
+    int max_byte_x = -1;
+    int min_y = SSD1677_PANEL_HEIGHT;
+    int max_y = -1;
+    size_t changed = 0;
+
+    if (previous == NULL || current == NULL ||
+        native_x == NULL || native_y == NULL ||
+        native_width == NULL || native_height == NULL) {
+        return -1;
+    }
+
+    for (int y = 0; y < SSD1677_PANEL_HEIGHT; y++) {
+        int row_offset = y * row_bytes;
+        for (int byte_x = 0; byte_x < row_bytes; byte_x++) {
+            int offset = row_offset + byte_x;
+            if (previous->bw[offset] == current->bw[offset]) {
+                continue;
+            }
+            changed++;
+            if (byte_x < min_byte_x) min_byte_x = byte_x;
+            if (byte_x > max_byte_x) max_byte_x = byte_x;
+            if (y < min_y) min_y = y;
+            if (y > max_y) max_y = y;
+        }
+    }
+
+    if (changed_bytes != NULL) {
+        *changed_bytes = changed;
+    }
+    if (changed == 0) {
+        *native_x = 0;
+        *native_y = 0;
+        *native_width = 0;
+        *native_height = 0;
+        return 0;
+    }
+
+    *native_x = min_byte_x * 8;
+    *native_y = min_y;
+    *native_width = (max_byte_x - min_byte_x + 1) * 8;
+    *native_height = max_y - min_y + 1;
+    return 1;
+}

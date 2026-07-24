@@ -3,10 +3,12 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,6 +18,28 @@
 
 static const char *TAG = "esp_display";
 static epd_frame_t packed_frame;
+
+static void esp_display_remember_area(esp_display_t *display,
+                                      int native_x, int native_y,
+                                      int native_width, int native_height) {
+    const int row_bytes = SSD1677_PANEL_WIDTH / 8;
+    int byte_x;
+    int byte_width;
+
+    if (display == NULL || display->previous_frame == NULL ||
+        native_x < 0 || native_y < 0 ||
+        native_width <= 0 || native_height <= 0) {
+        return;
+    }
+    byte_x = native_x / 8;
+    byte_width = native_width / 8;
+    for (int y = native_y; y < native_y + native_height; y++) {
+        int offset = y * row_bytes + byte_x;
+        memcpy(display->previous_frame + offset,
+               packed_frame.bw + offset,
+               (size_t)byte_width);
+    }
+}
 
 static int esp_display_controller_write_command(void *context, uint8_t command);
 static int esp_display_controller_write_data(void *context, const uint8_t *data, size_t length);
@@ -101,6 +125,13 @@ void esp_display_init(esp_display_t *display) {
     display->partial_refresh_count = 0;
     display->partial_since_full = 0;
     display->partial_area_since_full = 0;
+    display->previous_frame = heap_caps_malloc(
+        EPD_FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (display->previous_frame == NULL) {
+        display->previous_frame = heap_caps_malloc(
+            EPD_FRAME_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    display->previous_frame_valid = 0;
     display->hardware_ready = 0;
     display->spi = NULL;
     ESP_LOGI(TAG, "display adapter initialized for %s controller=%s framebuffer=%dx%d",
@@ -152,6 +183,9 @@ void esp_display_init(esp_display_t *display) {
                 ESP_LOGI(TAG, "SSD1677 controller initialized");
             }
         }
+    }
+    if (display->previous_frame == NULL) {
+        ESP_LOGW(TAG, "automatic dirty-region tracking unavailable: no 48KB frame cache");
     }
 }
 
@@ -291,12 +325,75 @@ int esp_display_present(esp_display_t *display, const gfx_framebuffer_t *fb) {
     display->refresh_count++;
     display->partial_since_full = 0;
     display->partial_area_since_full = 0;
+    if (display->previous_frame != NULL) {
+        memcpy(display->previous_frame, packed_frame.bw, EPD_FRAME_BYTES);
+        display->previous_frame_valid = 1;
+    }
     ESP_LOGI(TAG, "present SSD1677 BW frame %d: bytes=%d black=%d bw_sum=%08x",
              display->refresh_count,
              EPD_FRAME_BYTES,
              black,
              black_checksum);
     return 0;
+}
+
+int esp_display_present_auto(esp_display_t *display, const gfx_framebuffer_t *fb) {
+    int native_x;
+    int native_y;
+    int native_width;
+    int native_height;
+    int ui_x;
+    int ui_y;
+    int ui_width;
+    int ui_height;
+    int diff_result;
+    uint32_t dirty_area;
+    uint32_t full_area;
+    size_t changed_bytes = 0;
+    epd_frame_t *previous;
+
+    if (display == NULL || fb == NULL) {
+        return -1;
+    }
+    if (display->previous_frame == NULL || !display->previous_frame_valid) {
+        return esp_display_present(display, fb);
+    }
+    if (epd_frame_pack(fb, &packed_frame) != 0) {
+        return -1;
+    }
+
+    previous = (epd_frame_t *)display->previous_frame;
+    diff_result = epd_frame_diff_bounds(previous, &packed_frame,
+                                        &native_x, &native_y,
+                                        &native_width, &native_height,
+                                        &changed_bytes);
+    if (diff_result < 0) {
+        return -1;
+    }
+    if (diff_result == 0) {
+        ESP_LOGD(TAG, "automatic refresh skipped: framebuffer unchanged");
+        return 0;
+    }
+
+    dirty_area = (uint32_t)native_width * (uint32_t)native_height;
+    full_area = (uint32_t)SSD1677_PANEL_WIDTH * (uint32_t)SSD1677_PANEL_HEIGHT;
+    if (dirty_area * 100u >= full_area * ESP_EPD_AUTO_FULL_AREA_PERCENT) {
+        ESP_LOGI(TAG,
+                 "automatic refresh selected full update: area=%u/%u changed_bytes=%u",
+                 (unsigned int)dirty_area, (unsigned int)full_area,
+                 (unsigned int)changed_bytes);
+        return esp_display_present(display, fb);
+    }
+
+    /* Convert the native 800x480 diff box back to portrait UI coordinates. */
+    ui_x = SSD1677_PANEL_HEIGHT - (native_y + native_height);
+    ui_y = native_x;
+    ui_width = native_height;
+    ui_height = native_width;
+    ESP_LOGD(TAG,
+             "automatic refresh selected partial update: ui=(%d,%d %dx%d) changed_bytes=%u",
+             ui_x, ui_y, ui_width, ui_height, (unsigned int)changed_bytes);
+    return esp_display_present_partial(display, fb, ui_x, ui_y, ui_width, ui_height);
 }
 
 int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t *fb,
@@ -385,6 +482,10 @@ int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t 
     display->partial_refresh_count++;
     display->partial_since_full++;
     display->partial_area_since_full += (uint32_t)ui_width * (uint32_t)ui_height;
+    if (display->previous_frame != NULL && display->previous_frame_valid) {
+        esp_display_remember_area(display, native_x, native_y,
+                                  native_width, native_height);
+    }
     ESP_LOGD(TAG,
              "partial frame %d (partial total=%d, since full=%d/%d): ui=(%d,%d %dx%d) native=(%d,%d %dx%d) bytes=%d",
              display->refresh_count, display->partial_refresh_count,
@@ -407,5 +508,6 @@ void esp_display_sleep(esp_display_t *display) {
         ESP_LOGE(TAG, "SSD1677 deep sleep command failed");
         return;
     }
+    display->previous_frame_valid = 0;
     ESP_LOGI(TAG, "SSD1677 entered deep sleep after %d frame(s)", display->refresh_count);
 }

@@ -211,6 +211,51 @@ static void test_font_manager(void) {
     printf("  test_font_manager: PASS\n");
 }
 
+static void test_builtin_font_falls_back_for_missing_chinese(void) {
+    gfx_framebuffer_t missing_fb;
+    gfx_framebuffer_t fallback_fb;
+    gfx_framebuffer_t builtin_before_fb;
+    gfx_framebuffer_t builtin_after_fb;
+    const font_face_t *builtin = font_get_face(FONT_SIZE_20);
+    int interior_black = 0;
+
+    font_manager_free_all();
+    ASSERT_TRUE(font_find_glyph(builtin, 0x9f98) == NULL);
+    ASSERT_TRUE(font_find_glyph(builtin, 0x4e2d) != NULL);
+
+    gfx_init(&missing_fb);
+    gfx_init(&builtin_before_fb);
+    font_draw_text_builtin(20, &missing_fb, 10, 10, "龘", GFX_BLACK);
+    font_draw_text_builtin(20, &builtin_before_fb, 10, 10, "中", GFX_BLACK);
+    ASSERT_EQ_INT(20, font_measure_text_builtin(20, "龘"));
+
+    ASSERT_TRUE(font_manager_load_dir("assets/fonts/external") > 0);
+    gfx_init(&fallback_fb);
+    gfx_init(&builtin_after_fb);
+    font_draw_text_builtin(20, &fallback_fb, 10, 10, "龘", GFX_BLACK);
+    font_draw_text_builtin(20, &builtin_after_fb, 10, 10, "中", GFX_BLACK);
+
+    for (int y = 11; y < 29; y++) {
+        for (int x = 11; x < 29; x++) {
+            if (gfx_get_pixel(&fallback_fb, x, y) == GFX_BLACK) {
+                interior_black++;
+            }
+        }
+    }
+    ASSERT_TRUE(interior_black > 0);
+    ASSERT_TRUE(memcmp(&missing_fb, &fallback_fb, sizeof(missing_fb)) != 0);
+    ASSERT_TRUE(memcmp(&builtin_before_fb, &builtin_after_fb, sizeof(builtin_before_fb)) == 0);
+    ASSERT_EQ_INT(20, font_measure_text_builtin(20, "龘"));
+
+    gfx_init(&fallback_fb);
+    font_draw_text_builtin(14, &fallback_fb, 10, 10, "龘", GFX_BLACK);
+    ASSERT_EQ_INT(14, font_measure_text_builtin(14, "龘"));
+    ASSERT_TRUE(count_black_pixels(&fallback_fb) > 0);
+
+    font_manager_free_all();
+    printf("  test_builtin_font_falls_back_for_missing_chinese: PASS\n");
+}
+
 int main(void) {
     printf("=== External Font Tests ===\n\n");
 
@@ -221,6 +266,7 @@ int main(void) {
     test_measure_text();
     test_aligned_text();
     test_font_manager();
+    test_builtin_font_falls_back_for_missing_chinese();
 
     printf("\nAll external font tests passed!\n");
     return 0;
