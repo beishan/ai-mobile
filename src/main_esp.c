@@ -3,12 +3,14 @@
 #include "app/app_state.h"
 #include "font/font.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "gfx/gfx.h"
 #include "platform/esp_display.h"
 #include "platform/esp_input.h"
 #include "platform/esp_board_config.h"
 #include "platform/esp_battery.h"
+#include "platform/esp_async_runtime.h"
 #include "platform/esp_config_backup.h"
 #include "platform/esp_sd.h"
 #include "platform/esp_time_sync.h"
@@ -45,36 +47,20 @@ static const char *TAG = "ai_mobile";
 #define WIFI_SCAN_TASK_STACK_SIZE 6144
 #define PAGE_PREFETCH_TASK_STACK_SIZE 4096
 
-enum {
-    SD_LIBRARY_IDLE = 0,
-    SD_LIBRARY_LOADING,
-    SD_LIBRARY_COMPLETE,
-    SD_LIBRARY_READY
-};
-
-enum {
-    WIFI_SCAN_IDLE = 0,
-    WIFI_SCAN_RUNNING,
-    WIFI_SCAN_COMPLETE,
-    WIFI_SCAN_FAILED
-};
-
-static volatile int sd_library_state = SD_LIBRARY_IDLE;
-static volatile int sd_library_loaded_count;
-static volatile int sd_library_progress;
-static volatile int sd_library_total_count;
 static app_state_t deferred_save_app;
 static int deferred_save_sd_mounted;
 static int deferred_save_force_sd_backup;
 static TaskHandle_t deferred_save_task_handle;
-static portMUX_TYPE deferred_save_lock = portMUX_INITIALIZER_UNLOCKED;
-static app_state_t wifi_scan_request_app;
-static app_state_t wifi_scan_result_app;
-static volatile int wifi_scan_task_state;
+static StaticSemaphore_t deferred_save_mutex_storage;
+static SemaphoreHandle_t deferred_save_mutex;
 static TaskHandle_t page_prefetch_task_handle;
 static int page_prefetch_book;
 static int page_prefetch_page;
 static portMUX_TYPE page_prefetch_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static int sd_library_is_loading(void) {
+    return esp_async_library_snapshot().phase == ESP_ASYNC_RUNNING;
+}
 
 static int save_app_configuration_nvs(const app_state_t *app) {
     return app_persistence_save_nvs(APP_NVS_NAMESPACE, APP_NVS_KEY, app);
@@ -129,16 +115,16 @@ static void deferred_configuration_save_task(void *context) {
         while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(APP_SAVE_DEBOUNCE_MS)) > 0) {
             /* Restart the idle window whenever a newer state arrives. */
         }
-        taskENTER_CRITICAL(&deferred_save_lock);
+        xSemaphoreTake(deferred_save_mutex, portMAX_DELAY);
         *snapshot = deferred_save_app;
         force_sd_backup = deferred_save_force_sd_backup;
         deferred_save_force_sd_backup = 0;
-        taskEXIT_CRITICAL(&deferred_save_lock);
+        xSemaphoreGive(deferred_save_mutex);
 
         result = save_app_configuration_nvs(snapshot);
         saves_since_sd_backup++;
         if (deferred_save_sd_mounted &&
-            sd_library_state != SD_LIBRARY_LOADING &&
+            !sd_library_is_loading() &&
             (force_sd_backup ||
              saves_since_sd_backup >= APP_SD_BACKUP_SAVE_INTERVAL)) {
             if (backup_app_configuration_sd(snapshot) != 0) {
@@ -149,11 +135,11 @@ static void deferred_configuration_save_task(void *context) {
         }
         if (result != 0) {
             ESP_LOGW(TAG, "background app state save failed; retrying");
-            taskENTER_CRITICAL(&deferred_save_lock);
+            xSemaphoreTake(deferred_save_mutex, portMAX_DELAY);
             if (force_sd_backup) {
                 deferred_save_force_sd_backup = 1;
             }
-            taskEXIT_CRITICAL(&deferred_save_lock);
+            xSemaphoreGive(deferred_save_mutex);
             xTaskNotifyGive(deferred_save_task_handle);
         }
     }
@@ -161,6 +147,7 @@ static void deferred_configuration_save_task(void *context) {
 
 static int start_deferred_configuration_save_task(int sd_mounted) {
     deferred_save_sd_mounted = sd_mounted;
+    deferred_save_mutex = xSemaphoreCreateMutexStatic(&deferred_save_mutex_storage);
     if (xTaskCreatePinnedToCore(deferred_configuration_save_task, "app_save",
                                 APP_SAVE_TASK_STACK_SIZE, NULL,
                                 tskIDLE_PRIORITY + 1,
@@ -177,17 +164,17 @@ static void schedule_app_configuration_save_with_backup(const app_state_t *app,
     if (deferred_save_task_handle == NULL) {
         if (save_app_configuration(
                 app,
-                deferred_save_sd_mounted && sd_library_state != SD_LIBRARY_LOADING) != 0) {
+                deferred_save_sd_mounted && !sd_library_is_loading()) != 0) {
             ESP_LOGW(TAG, "synchronous fallback app state save failed");
         }
         return;
     }
-    taskENTER_CRITICAL(&deferred_save_lock);
+    xSemaphoreTake(deferred_save_mutex, portMAX_DELAY);
     deferred_save_app = *app;
     if (force_sd_backup) {
         deferred_save_force_sd_backup = 1;
     }
-    taskEXIT_CRITICAL(&deferred_save_lock);
+    xSemaphoreGive(deferred_save_mutex);
     xTaskNotifyGive(deferred_save_task_handle);
 }
 
@@ -210,44 +197,33 @@ static int persisted_app_state_changed(const app_state_t *previous,
 }
 
 static void sd_library_progress_callback(int book_index, int percent, void *context) {
-    int total = sd_library_total_count;
+    esp_async_library_snapshot_t snapshot = esp_async_library_snapshot();
+    int total = snapshot.total_count;
+    int progress;
     (void)context;
     if (total <= 0) {
-        sd_library_progress = 100;
+        esp_async_library_update_progress(100);
         return;
     }
-    sd_library_progress = (book_index * 100 + percent) / total;
-    if (sd_library_progress > 100) sd_library_progress = 100;
+    progress = (book_index * 100 + percent) / total;
+    esp_async_library_update_progress(progress);
 }
-
-enum {
-    READER_PAGINATION_IDLE = 0,
-    READER_PAGINATION_RUNNING,
-    READER_PAGINATION_COMPLETE
-};
-
-static volatile int reader_pagination_state = READER_PAGINATION_IDLE;
-static volatile int reader_pagination_result;
-static volatile int reader_pagination_book_index = -1;
 
 static void reader_pagination_task(void *arg) {
     int book_index = (int)(intptr_t)arg;
-    reader_pagination_result = reader_library_build_book_layout_background(book_index);
-    reader_pagination_state = READER_PAGINATION_COMPLETE;
+    int result = reader_library_build_book_layout_background(book_index);
+    esp_async_pagination_complete(result);
     vTaskDelete(NULL);
 }
 
 static void start_reader_background_pagination(int book_index) {
-    if (reader_pagination_state != READER_PAGINATION_IDLE ||
-        reader_library_book_layout_complete(book_index)) return;
-    reader_pagination_state = READER_PAGINATION_RUNNING;
-    reader_pagination_book_index = book_index;
+    if (reader_library_book_layout_complete(book_index) ||
+        !esp_async_pagination_try_start(book_index)) return;
     if (xTaskCreatePinnedToCore(reader_pagination_task, "page_rest",
                                 READER_PAGINATION_TASK_STACK_SIZE,
                                 (void *)(intptr_t)book_index,
                                 tskIDLE_PRIORITY + 1, NULL, 0) != pdPASS) {
-        reader_pagination_state = READER_PAGINATION_IDLE;
-        reader_pagination_book_index = -1;
+        esp_async_pagination_fail_start();
         ESP_LOGE(TAG, "failed to start background pagination task");
     } else {
         ESP_LOGI(TAG, "first pages ready; continuing pagination in background");
@@ -255,14 +231,17 @@ static void start_reader_background_pagination(int book_index) {
 }
 
 static void sd_library_load_task(void *arg) {
+    int total_count;
+    int loaded_count;
     (void)arg;
-    sd_library_total_count = reader_library_count_directory(ESP_SD_BOOK_DIRECTORY);
-    sd_library_progress = 0;
+    total_count = reader_library_count_directory(ESP_SD_BOOK_DIRECTORY);
+    esp_async_library_update_total(total_count);
+    esp_async_library_update_progress(0);
     reader_library_set_progress_callback(sd_library_progress_callback, NULL);
-    sd_library_loaded_count = reader_library_load_directory(ESP_SD_BOOK_DIRECTORY);
+    loaded_count = reader_library_load_directory(ESP_SD_BOOK_DIRECTORY);
     reader_library_set_progress_callback(NULL, NULL);
-    sd_library_progress = 100;
-    sd_library_state = SD_LIBRARY_COMPLETE;
+    if (loaded_count >= 0) esp_async_library_complete(loaded_count);
+    else esp_async_library_fail();
     vTaskDelete(NULL);
 }
 
@@ -387,43 +366,28 @@ static void refresh_wifi_networks(app_state_t *app) {
 }
 
 static void wifi_scan_task(void *context) {
+    app_state_t result;
     (void)context;
-    wifi_scan_result_app = wifi_scan_request_app;
-    refresh_wifi_networks(&wifi_scan_result_app);
-    wifi_scan_task_state = WIFI_SCAN_COMPLETE;
+    if (!esp_async_wifi_copy_request(&result)) {
+        esp_async_wifi_fail();
+        vTaskDelete(NULL);
+        return;
+    }
+    refresh_wifi_networks(&result);
+    esp_async_wifi_complete(&result);
     vTaskDelete(NULL);
 }
 
 static int start_wifi_scan(const app_state_t *app) {
-    if (app == NULL || wifi_scan_task_state == WIFI_SCAN_RUNNING) {
+    if (!esp_async_wifi_try_start(app)) {
         return -1;
     }
-    wifi_scan_request_app = *app;
-    wifi_scan_task_state = WIFI_SCAN_RUNNING;
     if (xTaskCreate(wifi_scan_task, "wifi_scan", WIFI_SCAN_TASK_STACK_SIZE,
                     NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
-        wifi_scan_task_state = WIFI_SCAN_FAILED;
+        esp_async_wifi_fail();
         return -1;
     }
     return 0;
-}
-
-static void apply_wifi_scan_result(app_state_t *app) {
-    if (app == NULL) return;
-    snprintf(app->wifi_ip, sizeof(app->wifi_ip), "%s", wifi_scan_result_app.wifi_ip);
-    memcpy(app->wifi_saved_ssids, wifi_scan_result_app.wifi_saved_ssids,
-           sizeof(app->wifi_saved_ssids));
-    app->wifi_saved_count = wifi_scan_result_app.wifi_saved_count;
-    memcpy(app->wifi_network_ssids, wifi_scan_result_app.wifi_network_ssids,
-           sizeof(app->wifi_network_ssids));
-    memcpy(app->wifi_network_rssi, wifi_scan_result_app.wifi_network_rssi,
-           sizeof(app->wifi_network_rssi));
-    memcpy(app->wifi_network_secure, wifi_scan_result_app.wifi_network_secure,
-           sizeof(app->wifi_network_secure));
-    app->wifi_network_count = wifi_scan_result_app.wifi_network_count;
-    app->wifi_network_selection = wifi_scan_result_app.wifi_network_selection;
-    app->wifi_scan_in_progress = 0;
-    app->wifi_scan_requested = 0;
 }
 
 static void page_prefetch_task(void *context) {
@@ -475,6 +439,8 @@ void app_main(void) {
     int provisioning_mode;
 
     ESP_LOGI(TAG, "booting ESP32 E-Ink reader firmware");
+
+    esp_async_runtime_init();
 
     fb = heap_caps_malloc(sizeof(*fb), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (fb == NULL) {
@@ -550,7 +516,7 @@ void app_main(void) {
     }
 
     if (sd_mounted) {
-        sd_library_state = SD_LIBRARY_LOADING;
+        esp_async_library_start();
         if (xTaskCreatePinnedToCore(sd_library_load_task, "book_index",
                                     SD_LIBRARY_TASK_STACK_SIZE, NULL,
                                     tskIDLE_PRIORITY + 1, NULL, 0) == pdPASS) {
@@ -558,7 +524,7 @@ void app_main(void) {
             app.reader_library_progress = 0;
             ESP_LOGI(TAG, "desktop ready; indexing TXT/EPUB books in background");
         } else {
-            sd_library_state = SD_LIBRARY_IDLE;
+            esp_async_library_fail();
             app.reader_library_loading = 0;
             ESP_LOGE(TAG, "failed to start background book indexing task");
         }
@@ -567,12 +533,12 @@ void app_main(void) {
     while (1) {
         app_button_t button;
         int button_repeat_count = 1;
-        if (wifi_scan_task_state == WIFI_SCAN_COMPLETE ||
-            wifi_scan_task_state == WIFI_SCAN_FAILED) {
-            int scan_succeeded = wifi_scan_task_state == WIFI_SCAN_COMPLETE;
-            wifi_scan_task_state = WIFI_SCAN_IDLE;
+        esp_async_library_snapshot_t library_snapshot = esp_async_library_snapshot();
+        esp_async_pagination_snapshot_t pagination_snapshot =
+            esp_async_pagination_snapshot();
+        int scan_succeeded;
+        if (esp_async_wifi_take_result(&app, &scan_succeeded)) {
             if (scan_succeeded) {
-                apply_wifi_scan_result(&app);
                 ESP_LOGI(TAG, "background Wi-Fi scan complete: %d network(s)",
                          app.wifi_saved_count + app.wifi_network_count);
             } else {
@@ -588,8 +554,8 @@ void app_main(void) {
                 }
             }
         }
-        if (sd_library_state == SD_LIBRARY_COMPLETE) {
-            sd_library_state = SD_LIBRARY_READY;
+        if (library_snapshot.phase == ESP_ASYNC_COMPLETE) {
+            esp_async_library_mark_ready();
             app.reader_library_loading = 0;
             app.reader_library_progress = 100;
             if (app_persistence_load_nvs(APP_NVS_NAMESPACE, APP_NVS_KEY, &app) == 0) {
@@ -601,7 +567,7 @@ void app_main(void) {
             app_sync_reader_library(&app);
             schedule_app_configuration_save(&app);
             ESP_LOGI(TAG, "background indexing complete: loaded %d TXT/EPUB book(s) from %s",
-                     sd_library_loaded_count, ESP_SD_BOOK_DIRECTORY);
+                     library_snapshot.loaded_count, ESP_SD_BOOK_DIRECTORY);
             if (app.page == APP_PAGE_BOOKSHELF) {
                 ui_render_page(fb, &app, &font);
                 if (esp_display_present_partial(&display, fb, 0, 32,
@@ -610,9 +576,9 @@ void app_main(void) {
                 }
             }
         }
-        if (sd_library_state == SD_LIBRARY_LOADING &&
-            app.reader_library_progress != sd_library_progress) {
-            app.reader_library_progress = sd_library_progress;
+        if (library_snapshot.phase == ESP_ASYNC_RUNNING &&
+            app.reader_library_progress != library_snapshot.progress) {
+            app.reader_library_progress = library_snapshot.progress;
             if (app.page == APP_PAGE_BOOKSHELF) {
                 ui_render_page(fb, &app, &font);
                 if (esp_display_present_partial(&display, fb, 0, 32,
@@ -621,13 +587,12 @@ void app_main(void) {
                 }
             }
         }
-        if (reader_pagination_state == READER_PAGINATION_COMPLETE) {
+        if (pagination_snapshot.phase == ESP_ASYNC_COMPLETE) {
             int completed_book = -1;
-            int commit_result = reader_pagination_result > 0
+            int commit_result = pagination_snapshot.result > 0
                                     ? reader_library_commit_background_layout(&completed_book)
                                     : -1;
-            reader_pagination_state = READER_PAGINATION_IDLE;
-            reader_pagination_book_index = -1;
+            esp_async_pagination_mark_idle();
             app.reader_background_pagination_active = 0;
             app.reader_background_pagination_progress = 100;
             if (commit_result > 0) {
@@ -648,10 +613,11 @@ void app_main(void) {
         }
         if (app.page == APP_PAGE_READER) {
             start_reader_background_pagination(app.current_book);
+            pagination_snapshot = esp_async_pagination_snapshot();
         }
-        if (reader_pagination_state == READER_PAGINATION_RUNNING &&
+        if (pagination_snapshot.phase == ESP_ASYNC_RUNNING &&
             app.page == APP_PAGE_READER &&
-            app.current_book == reader_pagination_book_index) {
+            app.current_book == pagination_snapshot.book_index) {
             int progress = reader_library_background_progress();
             if (!app.reader_background_pagination_active ||
                 app.reader_background_pagination_progress != progress) {
@@ -665,7 +631,7 @@ void app_main(void) {
             }
         } else if (app.reader_background_pagination_active &&
                    (app.page != APP_PAGE_READER ||
-                    app.current_book != reader_pagination_book_index)) {
+                    app.current_book != pagination_snapshot.book_index)) {
             app.reader_background_pagination_active = 0;
         }
         if (esp_input_poll_button_batch(&input, &button, &button_repeat_count)) {
@@ -683,20 +649,20 @@ void app_main(void) {
                 esp_display_sleep(&display);
                 continue;
             }
-            if (sd_library_state == SD_LIBRARY_LOADING && app.page == APP_PAGE_HOME &&
+            if (library_snapshot.phase == ESP_ASYNC_RUNNING && app.page == APP_PAGE_HOME &&
                 button == APP_BUTTON_HOME &&
                 app.home_selection == 1) {
                 ESP_LOGI(TAG, "book indexing is still running; file browser will be available shortly");
                 continue;
             }
-            if (sd_library_state != SD_LIBRARY_LOADING) {
+            if (library_snapshot.phase != ESP_ASYNC_RUNNING) {
                 reader_library_set_progress_callback(present_reader_pagination_progress,
                                                       &button_pagination_progress);
             }
             for (int repeat = 0; repeat < button_repeat_count; repeat++) {
                 app_handle_button(&app, button);
             }
-            if (sd_library_state != SD_LIBRARY_LOADING) {
+            if (library_snapshot.phase != ESP_ASYNC_RUNNING) {
                 reader_library_set_progress_callback(NULL, NULL);
             }
             if (previous_page != APP_PAGE_WIFI_SETUP && app.page == APP_PAGE_WIFI_SETUP) {
@@ -705,7 +671,7 @@ void app_main(void) {
                 app.wifi_scan_requested = 1;
             }
             if (app.page == APP_PAGE_WIFI_SETUP && app.wifi_scan_requested) {
-                if (wifi_scan_task_state == WIFI_SCAN_RUNNING) {
+                if (esp_async_wifi_phase() == ESP_ASYNC_RUNNING) {
                     app.wifi_scan_requested = 0;
                     app.wifi_scan_in_progress = 1;
                     ESP_LOGD(TAG, "Wi-Fi scan already running");
@@ -719,7 +685,7 @@ void app_main(void) {
                     }
                     if (start_wifi_scan(&app) != 0) {
                         app.wifi_scan_in_progress = 0;
-                        wifi_scan_task_state = WIFI_SCAN_FAILED;
+                        esp_async_wifi_fail();
                     }
                 }
             }
@@ -766,7 +732,7 @@ void app_main(void) {
 
             /* Persist after the visible update so flash and SD latency never
              * delays button feedback. Transient cursor/menu state is skipped. */
-            if (sd_library_state == SD_LIBRARY_LOADING) {
+            if (library_snapshot.phase == ESP_ASYNC_RUNNING) {
                 ESP_LOGD(TAG, "deferred state save until book library is ready");
             } else if (persistence_changed) {
                 schedule_app_configuration_save(&app);

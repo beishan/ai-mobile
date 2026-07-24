@@ -1,4 +1,5 @@
 #include "font/font.h"
+#include "font/font_metadata.h"
 #include "platform/storage_io.h"
 
 #include <stddef.h>
@@ -425,46 +426,6 @@ external_font_t *external_font_create(void) {
     return efont;
 }
 
-static void external_font_parse_filename(external_font_t *efont, const char *filepath) {
-    const char *filename = strrchr(filepath, '/');
-    const char *cursor;
-    const char *family;
-    char *end;
-    size_t family_len;
-    filename = filename != NULL ? filename + 1 : filepath;
-    snprintf(efont->name, sizeof(efont->name), "%s", filename);
-    snprintf(efont->path, sizeof(efont->path), "%s", filepath);
-    cursor = filename;
-    efont->nominal_size = (int)strtol(cursor, &end, 10);
-    if (end != cursor) cursor = end;
-    while (*cursor == ' ' || *cursor == '_' || *cursor == '-') cursor++;
-    {
-        int width = (int)strtol(cursor, &end, 10);
-        if (end != cursor) {
-            cursor = end;
-            if (*cursor == 'x' || *cursor == 'X') cursor++;
-            else if ((unsigned char)cursor[0] == 0xc3 &&
-                     (unsigned char)cursor[1] == 0x97) cursor += 2;
-            else width = 0;
-            if (width > 0) {
-                int height = (int)strtol(cursor, &end, 10);
-                if (end != cursor && height > 0) {
-                    efont->width = width;
-                    efont->height = height;
-                    cursor = end;
-                }
-            }
-        }
-    }
-    while (*cursor == ' ' || *cursor == '_' || *cursor == '-') cursor++;
-    family = *cursor != '\0' ? cursor : filename;
-    family_len = strlen(family);
-    if (family_len > 4 && strcmp(family + family_len - 4, ".bin") == 0) family_len -= 4;
-    if (family_len >= sizeof(efont->family)) family_len = sizeof(efont->family) - 1;
-    memcpy(efont->family, family, family_len);
-    efont->family[family_len] = '\0';
-}
-
 static int __attribute__((unused)) external_font_load_file_legacy(external_font_t *efont, const char *filepath) {
     FILE *file;
     long file_size;
@@ -581,12 +542,12 @@ int external_font_load_file(external_font_t *efont, const char *filepath) {
     external_font_cache_forget(efont);
 #ifndef ESP_PLATFORM
     int result = external_font_load_file_legacy(efont, filepath);
-    if (result == 0) external_font_parse_filename(efont, filepath);
+    if (result == 0) font_metadata_parse_filename(efont, filepath);
     return result;
 #else
     FILE *file;
     long file_size;
-    external_font_parse_filename(efont, filepath);
+    font_metadata_parse_filename(efont, filepath);
     file = fopen(filepath, "rb");
     if (file == NULL) return -1;
     if (fseek(file, 0, SEEK_END) != 0 || (file_size = ftell(file)) <= 0) {

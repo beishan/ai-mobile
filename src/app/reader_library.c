@@ -1,4 +1,5 @@
 #include "app/reader_library.h"
+#include "app/reader_library_path.h"
 
 #include "app/app_state.h"
 #include "app/epub_reader.h"
@@ -9,6 +10,7 @@
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -106,8 +108,8 @@ static reader_book_slot_t *background_result;
 static reader_layout_t background_result_layout;
 static uint32_t background_result_book_id;
 static int background_result_book_index = -1;
-static volatile int background_result_ready;
-static volatile int background_progress;
+static atomic_int background_result_ready;
+static atomic_int background_progress;
 
 static void *reader_large_calloc(size_t count, size_t size) {
 #ifdef ESP_PLATFORM
@@ -150,63 +152,6 @@ static void report_index_progress(reader_book_slot_t *slot, int percent) {
     if (progress_callback == NULL || slot == NULL || slots == NULL) return;
     book_index = (int)(slot - slots);
     progress_callback(book_index, percent, progress_context);
-}
-
-static int has_txt_extension(const char *name) {
-    size_t len;
-    if (name == NULL) return 0;
-    len = strlen(name);
-    return len > 4 && name[len - 4] == '.' &&
-           (name[len - 3] == 't' || name[len - 3] == 'T') &&
-           (name[len - 2] == 'x' || name[len - 2] == 'X') &&
-           (name[len - 1] == 't' || name[len - 1] == 'T');
-}
-
-static int has_epub_extension(const char *name) {
-    size_t len;
-    if (name == NULL) return 0;
-    len = strlen(name);
-    return len > 5 && name[len - 5] == '.' &&
-           (name[len - 4] == 'e' || name[len - 4] == 'E') &&
-           (name[len - 3] == 'p' || name[len - 3] == 'P') &&
-           (name[len - 2] == 'u' || name[len - 2] == 'U') &&
-           (name[len - 1] == 'b' || name[len - 1] == 'B');
-}
-
-static int has_book_extension(const char *name) {
-    return has_txt_extension(name) || has_epub_extension(name);
-}
-
-static const char *path_basename(const char *path) {
-    const char *base = path == NULL ? "" : path;
-    for (const char *p = base; *p != '\0'; p++) {
-        if (*p == '/') base = p + 1;
-    }
-    return base;
-}
-
-static void copy_title(char *dest, size_t dest_size, const char *path) {
-    const char *base = path_basename(path);
-    size_t len = strlen(base);
-    if (len > 4 && has_txt_extension(base)) len -= 4;
-    else if (len > 5 && has_epub_extension(base)) len -= 5;
-    if (len >= dest_size) len = dest_size - 1;
-    memcpy(dest, base, len);
-    dest[len] = '\0';
-}
-
-static uint32_t hash_book_identity(const char *path, long size) {
-    uint32_t hash = 2166136261u;
-    const unsigned char *p = (const unsigned char *)path;
-    while (*p != '\0') {
-        hash ^= *p++;
-        hash *= 16777619u;
-    }
-    for (unsigned int i = 0; i < sizeof(size); i++) {
-        hash ^= (uint32_t)((unsigned long)size >> (i * 8)) & 0xffu;
-        hash *= 16777619u;
-    }
-    return hash != 0 ? hash : 1u;
 }
 
 static int epub_content_path(uint32_t id, char *path, size_t path_size) {
@@ -352,7 +297,8 @@ static int index_book_with_layout(reader_book_slot_t *slot,
                 report_index_progress(slot, next_progress_percent);
                 storage_io_lock(STORAGE_IO_BACKGROUND);
             } else {
-                background_progress = next_progress_percent;
+                atomic_store_explicit(&background_progress, next_progress_percent,
+                                      memory_order_relaxed);
             }
             next_progress_percent += 20;
             next_progress_offset = info.st_size * next_progress_percent / 100;
@@ -430,7 +376,7 @@ static int index_book_with_layout(reader_book_slot_t *slot,
     slot->layout_valid = page > 0;
     slot->layout_complete = byte_offset >= info.st_size || page >= READER_MAX_PAGES;
     if (report_progress) report_index_progress(slot, 100);
-    else background_progress = 100;
+    else atomic_store_explicit(&background_progress, 100, memory_order_relaxed);
     return page > 0 ? 0 : -1;
 }
 
@@ -448,16 +394,16 @@ static int load_slot_mode(int book_index, const char *path, int initial_only) {
     reader_book_slot_t *slot;
     struct stat info;
     if (ensure_slots() != 0 || book_index < 0 || book_index >= APP_BOOK_COUNT || path == NULL ||
-        !has_book_extension(path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) return -1;
+        !reader_path_has_book_extension(path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) return -1;
     slot = &slots[book_index];
     clear_slot(slot);
     if (snprintf(slot->path, sizeof(slot->path), "%s", path) >= (int)sizeof(slot->path)) return -1;
-    slot->id = hash_book_identity(slot->path, (long)info.st_size);
-    copy_title(slot->title, sizeof(slot->title), path);
+    slot->id = reader_path_identity(slot->path, (long)info.st_size);
+    reader_path_copy_title(slot->title, sizeof(slot->title), path);
     snprintf(slot->author, sizeof(slot->author), "SD 卡文件");
     if (info.st_size >= 1024 * 1024) snprintf(slot->size_label, sizeof(slot->size_label), "%.1f MB", (double)info.st_size / (1024.0 * 1024.0));
     else snprintf(slot->size_label, sizeof(slot->size_label), "%u KB", (unsigned int)((info.st_size + 1023) / 1024));
-    if (has_epub_extension(path)) {
+    if (reader_path_has_epub_extension(path)) {
         epub_metadata_t metadata;
         if (epub_content_path(slot->id, slot->content_path, sizeof(slot->content_path)) != 0 ||
             epub_extract_text(path, slot->content_path, &metadata) != 0) {
@@ -580,7 +526,7 @@ static int restore_cached_slot(int book_index, const char *path,
     clear_slot(slot);
     snprintf(slot->path, sizeof(slot->path), "%s", path);
     slot->id = entry->id;
-    if (has_epub_extension(path)) {
+    if (reader_path_has_epub_extension(path)) {
         if (epub_content_path(slot->id, slot->content_path, sizeof(slot->content_path)) != 0 ||
             stat(slot->content_path, &content_info) != 0 || content_info.st_size <= 0) return -1;
     } else {
@@ -592,7 +538,7 @@ static int restore_cached_slot(int book_index, const char *path,
             (i > 0 && entry->page_offsets[i] < entry->page_offsets[i - 1])) return -1;
     }
     if (entry->title[0] != '\0') snprintf(slot->title, sizeof(slot->title), "%s", entry->title);
-    else copy_title(slot->title, sizeof(slot->title), path);
+    else reader_path_copy_title(slot->title, sizeof(slot->title), path);
     if (entry->author[0] != '\0') snprintf(slot->author, sizeof(slot->author), "%s", entry->author);
     else snprintf(slot->author, sizeof(slot->author), "SD 卡文件");
     if (info.st_size >= 1024 * 1024) {
@@ -604,7 +550,7 @@ static int restore_cached_slot(int book_index, const char *path,
     }
     snprintf(slot->file_type, sizeof(slot->file_type), "%s",
              entry->file_type[0] != '\0' ? entry->file_type :
-             (has_epub_extension(path) ? "EPUB" : "TXT"));
+             (reader_path_has_epub_extension(path) ? "EPUB" : "TXT"));
     slot->page_count = entry->page_count;
     slot->chapter_count = entry->chapter_count;
     slot->truncated = entry->truncated;
@@ -748,7 +694,7 @@ static int collect_book_paths(const char *directory, char paths[][READER_BOOK_PA
     if (directory == NULL || (dir = opendir(directory)) == NULL) return 0;
     while ((entry = readdir(dir)) != NULL) {
         char path[READER_BOOK_PATH_MAX];
-        if (!has_book_extension(entry->d_name) ||
+        if (!reader_path_has_book_extension(entry->d_name) ||
             snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name) >= (int)sizeof(path)) continue;
         insert_sorted_path(paths, &count, path);
     }
@@ -904,13 +850,14 @@ int reader_library_build_book_layout_background(int book_index) {
     reader_layout_t result_layout;
     uint32_t result_id;
     if (book_index < 0 || book_index >= reader_library_book_count() ||
-        slots[book_index].layout_complete || background_result_ready) return 0;
+        slots[book_index].layout_complete ||
+        atomic_load_explicit(&background_result_ready, memory_order_acquire)) return 0;
     result = reader_large_malloc(sizeof(*result));
     if (result == NULL) return -1;
     *result = slots[book_index];
     result_layout = layout;
     result_id = slots[book_index].id;
-    background_progress = 0;
+    atomic_store_explicit(&background_progress, 0, memory_order_relaxed);
     if (index_book_with_layout(result, &result_layout, READER_MAX_PAGES, 0) != 0) {
         reader_large_free(result);
         return -1;
@@ -919,21 +866,21 @@ int reader_library_build_book_layout_background(int book_index) {
     background_result_book_id = result_id;
     background_result_book_index = book_index;
     background_result = result;
-    background_result_ready = 1;
+    atomic_store_explicit(&background_result_ready, 1, memory_order_release);
     return 1;
 }
 
 int reader_library_background_progress(void) {
-    return background_progress;
+    return atomic_load_explicit(&background_progress, memory_order_relaxed);
 }
 
 int reader_library_commit_background_layout(int *book_index) {
     reader_book_slot_t *result;
     int index;
-    if (!background_result_ready) return 0;
+    if (!atomic_load_explicit(&background_result_ready, memory_order_acquire)) return 0;
     result = background_result;
     index = background_result_book_index;
-    background_result_ready = 0;
+    atomic_store_explicit(&background_result_ready, 0, memory_order_release);
     background_result = NULL;
     background_result_book_index = -1;
     if (result == NULL || index < 0 || index >= reader_library_book_count() ||

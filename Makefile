@@ -4,13 +4,13 @@ SDL_CFLAGS := $(shell sdl2-config --cflags)
 SDL_LIBS := $(shell sdl2-config --libs)
 
 TEST_BIN := tests/test_runner
-TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/epd_frame.c src/platform/ssd1677.c src/platform/input_debounce.c src/platform/storage_io.c src/platform/sim_display.c src/platform/sdl_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/epub_reader.c src/ui/pages.c src/ui/page_simple.c src/ui/icons.c src/font/font.c
-SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/storage_io.c src/platform/sim_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/epub_reader.c src/ui/pages.c src/ui/page_simple.c src/ui/icons.c src/font/font.c
-SDL_SIM_SRCS := src/main_sdl.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/storage_io.c src/platform/sdl_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/epub_reader.c src/ui/pages.c src/ui/page_simple.c src/ui/icons.c src/font/font.c
+TEST_SRCS := tests/test_runner.c src/gfx/gfx.c src/platform/epd_frame.c src/platform/ssd1677.c src/platform/input_debounce.c src/platform/storage_io.c src/platform/sim_display.c src/platform/sdl_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_page_names.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/reader_library_path.c src/app/epub_reader.c src/ui/pages.c src/ui/page_simple.c src/ui/page_layout.c src/ui/icons.c src/font/font.c src/font/font_metadata.c
+SIM_SRCS := src/main.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/storage_io.c src/platform/sim_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_page_names.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/reader_library_path.c src/app/epub_reader.c src/ui/pages.c src/ui/page_simple.c src/ui/page_layout.c src/ui/icons.c src/font/font.c src/font/font_metadata.c
+SDL_SIM_SRCS := src/main_sdl.c src/gfx/gfx.c src/platform/input_debounce.c src/platform/storage_io.c src/platform/sdl_display.c src/platform/esp_time_sync_host.c src/app/app_state.c src/app/app_page_names.c src/app/app_persistence.c src/app/file_browser.c src/app/reader_library.c src/app/reader_library_path.c src/app/epub_reader.c src/ui/pages.c src/ui/page_simple.c src/ui/page_layout.c src/ui/icons.c src/font/font.c src/font/font_metadata.c
 
 # External font test
 EXT_FONT_TEST_BIN := tests/test_external_font
-EXT_FONT_TEST_SRCS := tests/test_external_font.c src/gfx/gfx.c src/platform/storage_io.c src/platform/sim_display.c src/font/font.c
+EXT_FONT_TEST_SRCS := tests/test_external_font.c src/gfx/gfx.c src/platform/storage_io.c src/platform/sim_display.c src/font/font.c src/font/font_metadata.c
 
 .PHONY: test clean test-external-font
 
