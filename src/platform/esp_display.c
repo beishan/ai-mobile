@@ -133,6 +133,7 @@ void esp_display_init(esp_display_t *display) {
     }
     display->previous_frame_valid = 0;
     display->hardware_ready = 0;
+    display->energy_saving_level = 0;
     display->spi = NULL;
     ESP_LOGI(TAG, "display adapter initialized for %s controller=%s framebuffer=%dx%d",
              ESP_EPD_PANEL_NAME,
@@ -427,9 +428,15 @@ int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t 
 #if ESP_EPD_PARTIAL_REFRESH_LIMIT > 0
     {
         uint32_t update_area = (uint32_t)ui_width * (uint32_t)ui_height;
+        int refresh_limit = ESP_EPD_PARTIAL_REFRESH_LIMIT;
+        int area_screens = ESP_EPD_PARTIAL_AREA_SCREENS;
+        if (display->energy_saving_level >= 2) {
+            refresh_limit *= 2;
+            area_screens *= 2;
+        }
         uint32_t area_limit = (uint32_t)GFX_WIDTH * (uint32_t)GFX_HEIGHT *
-                              (uint32_t)ESP_EPD_PARTIAL_AREA_SCREENS;
-        if (display->partial_since_full >= ESP_EPD_PARTIAL_REFRESH_LIMIT ||
+                              (uint32_t)area_screens;
+        if (display->partial_since_full >= refresh_limit ||
             display->partial_area_since_full + update_area >= area_limit) {
             ESP_LOGI(TAG,
                      "adaptive partial limit reached: count=%d area=%u/%u; full refresh",
@@ -510,4 +517,11 @@ void esp_display_sleep(esp_display_t *display) {
     }
     display->previous_frame_valid = 0;
     ESP_LOGI(TAG, "SSD1677 entered deep sleep after %d frame(s)", display->refresh_count);
+}
+
+void esp_display_set_energy_saving(esp_display_t *display, int level) {
+    if (display == NULL) return;
+    if (level < 0) level = 0;
+    if (level > 2) level = 2;
+    display->energy_saving_level = level;
 }

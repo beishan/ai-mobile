@@ -74,7 +74,7 @@
 #define ESP_SD_MOUNT_POINT "/sdcard"
 #define ESP_SD_BOOK_DIRECTORY ESP_SD_MOUNT_POINT "/books"
 #define ESP_SD_MAX_OPEN_FILES 5
-#define ESP_SD_SPI_HZ_KHZ 10000         /* 10 MHz，优先保证杜邦线连接稳定 */
+#define ESP_SD_SPI_HZ_KHZ 20000         /* 20 MHz：配合 16 KB FAT 簇写入，提高 Web 上传速度 */
 
 /* ----------------------------------------------------------------
  * 模块三：Wi-Fi 与 NTP 自动校时
@@ -127,7 +127,7 @@
 #define ESP_EPD_RESET_HIGH_MS 200       /* RST 拉高后的稳定等待 */
 #define ESP_EPD_BUSY_TIMEOUT_MS 60000   /* 全刷最长等待：60 秒 */
 #define ESP_EPD_PARTIAL_REFRESH_LIMIT 24 /* 小面积局刷硬上限；大面积刷新按累计面积更早全刷 */
-#define ESP_EPD_PARTIAL_AREA_SCREENS 3  /* 累计刷新约 3 个整屏面积后自动消残影 */
+#define ESP_EPD_PARTIAL_AREA_SCREENS 12 /* 阅读翻页累计约 12 个整屏面积后自动消残影 */
 #define ESP_EPD_AUTO_FULL_AREA_PERCENT 70 /* 自动帧差包围区达到整屏 70% 时直接全刷 */
 
 /* 仅用于启动日志显示；实际供电必须接开发板 3V3 和 GND。 */

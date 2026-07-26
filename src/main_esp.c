@@ -8,6 +8,7 @@
 #include "gfx/gfx.h"
 #include "platform/esp_display.h"
 #include "platform/esp_input.h"
+#include "platform/esp_power.h"
 #include "platform/esp_board_config.h"
 #include "platform/esp_battery.h"
 #include "platform/esp_async_runtime.h"
@@ -46,6 +47,12 @@ static const char *TAG = "ai_mobile";
 #define APP_SD_BACKUP_SAVE_INTERVAL 10
 #define WIFI_SCAN_TASK_STACK_SIZE 6144
 #define PAGE_PREFETCH_TASK_STACK_SIZE 4096
+#define POWER_IDLE_SLEEP_MS 30000
+#define POWER_WIFI_SESSION_MS 20000
+#define POWER_READER_CLOCK_MINUTES 10
+#define POWER_LOW_BATTERY_CLOCK_MINUTES 30
+#define POWER_WEATHER_MINUTES 60
+#define POWER_LOW_BATTERY_PERCENT 15
 
 static app_state_t deferred_save_app;
 static int deferred_save_sd_mounted;
@@ -222,7 +229,7 @@ static void start_reader_background_pagination(int book_index) {
     if (xTaskCreatePinnedToCore(reader_pagination_task, "page_rest",
                                 READER_PAGINATION_TASK_STACK_SIZE,
                                 (void *)(intptr_t)book_index,
-                                tskIDLE_PRIORITY + 1, NULL, 0) != pdPASS) {
+                                tskIDLE_PRIORITY + 1, NULL, 1) != pdPASS) {
         esp_async_pagination_fail_start();
         ESP_LOGE(TAG, "failed to start background pagination task");
     } else {
@@ -245,6 +252,22 @@ static void sd_library_load_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+static int start_sd_library_load(app_state_t *app) {
+    esp_async_library_start();
+    if (xTaskCreatePinnedToCore(sd_library_load_task, "book_index",
+                                SD_LIBRARY_TASK_STACK_SIZE, NULL,
+                                tskIDLE_PRIORITY + 1, NULL, 0) != pdPASS) {
+        esp_async_library_fail();
+        app->reader_library_loading = 0;
+        ESP_LOGE(TAG, "failed to start background book indexing task");
+        return -1;
+    }
+    app->reader_library_loading = 1;
+    app->reader_library_progress = 0;
+    ESP_LOGI(TAG, "indexing TXT/EPUB books in background");
+    return 0;
+}
+
 static void init_nvs_storage(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -261,6 +284,23 @@ static void init_nvs_storage(void) {
 static long long current_epoch_minute(void) {
     time_t now = time(NULL);
     return now >= (time_t)1700000000 ? (long long)(now / 60) : -1;
+}
+
+static int app_low_battery(const app_state_t *app) {
+    return app != NULL && app->battery_valid &&
+           app->battery_percent <= POWER_LOW_BATTERY_PERCENT;
+}
+
+static int clock_refresh_due(const app_state_t *app, long long minute) {
+    int interval;
+    if (app == NULL || minute < 0) return 0;
+    if (!app->power_saving_enabled) return 1;
+    if (app->page == APP_PAGE_HOME || app->page == APP_PAGE_WEATHER ||
+        app->page == APP_PAGE_CALENDAR || app->page == APP_PAGE_SETTINGS ||
+        app->page == APP_PAGE_WIFI_SETUP) return 1;
+    interval = app_low_battery(app) ? POWER_LOW_BATTERY_CLOCK_MINUTES
+                                    : POWER_READER_CLOCK_MINUTES;
+    return minute % interval == 0;
 }
 
 typedef struct {
@@ -437,6 +477,9 @@ void app_main(void) {
     unsigned int weather_generation = 0;
     int sd_mounted = 0;
     int provisioning_mode;
+    int weather_request_pending = 0;
+    int64_t wifi_session_deadline_us = -1;
+    int64_t last_activity_us;
 
     ESP_LOGI(TAG, "booting ESP32 E-Ink reader firmware");
 
@@ -487,12 +530,16 @@ void app_main(void) {
         app.battery_valid = esp_battery_read_percent(&app.battery_percent,
                                                      &battery_mv) == 0;
     }
-    if (esp_web_admin_start(sd_mounted, provisioning_mode) != 0) {
+    if ((provisioning_mode || !app.power_saving_enabled) &&
+        esp_web_admin_start(sd_mounted, provisioning_mode) != 0) {
         ESP_LOGE(TAG, "failed to start web administration service");
     }
     gfx_init(fb);
     esp_display_init(&display);
     esp_input_init(&input);
+    esp_power_init(app.power_saving_enabled);
+    esp_display_set_energy_saving(
+        &display, app.power_saving_enabled ? (app_low_battery(&app) ? 2 : 1) : 0);
     if (start_deferred_configuration_save_task(sd_mounted) != 0) {
         ESP_LOGW(TAG, "background app state save unavailable; using synchronous fallback");
     }
@@ -511,23 +558,20 @@ void app_main(void) {
         ESP_LOGE(TAG, "failed to present first frame");
     }
     last_clock_minute = current_epoch_minute();
-    if (app.wifi_connected && esp_weather_request_update() == 0) {
+    last_activity_us = esp_timer_get_time();
+    if (app.wifi_connected && !app_low_battery(&app) &&
+        esp_weather_request_update() == 0) {
         last_weather_request_minute = last_clock_minute >= 0 ? last_clock_minute : 0;
+    } else if (!app_low_battery(&app) && esp_weather_is_configured()) {
+        weather_request_pending = 1;
+    }
+    if (app.power_saving_enabled && !provisioning_mode) {
+        wifi_session_deadline_us =
+            esp_timer_get_time() + (int64_t)POWER_WIFI_SESSION_MS * 1000;
     }
 
     if (sd_mounted) {
-        esp_async_library_start();
-        if (xTaskCreatePinnedToCore(sd_library_load_task, "book_index",
-                                    SD_LIBRARY_TASK_STACK_SIZE, NULL,
-                                    tskIDLE_PRIORITY + 1, NULL, 0) == pdPASS) {
-            app.reader_library_loading = 1;
-            app.reader_library_progress = 0;
-            ESP_LOGI(TAG, "desktop ready; indexing TXT/EPUB books in background");
-        } else {
-            esp_async_library_fail();
-            app.reader_library_loading = 0;
-            ESP_LOGE(TAG, "failed to start background book indexing task");
-        }
+        (void)start_sd_library_load(&app);
     }
 
     while (1) {
@@ -537,6 +581,15 @@ void app_main(void) {
         esp_async_pagination_snapshot_t pagination_snapshot =
             esp_async_pagination_snapshot();
         int scan_succeeded;
+        if (sd_mounted &&
+            (library_snapshot.phase == ESP_ASYNC_IDLE ||
+             library_snapshot.phase == ESP_ASYNC_READY ||
+             library_snapshot.phase == ESP_ASYNC_FAILED) &&
+            esp_web_admin_take_books_changed()) {
+            ESP_LOGI(TAG, "web book change detected; refreshing bookshelf");
+            (void)start_sd_library_load(&app);
+            library_snapshot = esp_async_library_snapshot();
+        }
         if (esp_async_wifi_take_result(&app, &scan_succeeded)) {
             if (scan_succeeded) {
                 ESP_LOGI(TAG, "background Wi-Fi scan complete: %d network(s)",
@@ -623,11 +676,12 @@ void app_main(void) {
                 app.reader_background_pagination_progress != progress) {
                 app.reader_background_pagination_active = 1;
                 app.reader_background_pagination_progress = progress;
-                ui_render_page(fb, &app, &font);
-                if (esp_display_present_partial(&display, fb, 0, 770,
-                                                GFX_WIDTH, 30) != 0) {
-                    ESP_LOGW(TAG, "failed to update background pagination progress");
-                }
+                /*
+                 * Do not refresh the e-paper for progress-only changes. BUSY
+                 * waits here used to occupy the main loop repeatedly, delaying
+                 * button events even though the first 16 pages were ready.
+                 * The latest progress is shown on the next user-driven frame.
+                 */
             }
         } else if (app.reader_background_pagination_active &&
                    (app.page != APP_PAGE_READER ||
@@ -639,14 +693,33 @@ void app_main(void) {
             app_page_t previous_page = previous_app.page;
             int button_state_changed;
             int persistence_changed;
+            int reader_content_changed;
             int64_t button_started_us = esp_timer_get_time();
             int64_t render_time_us = 0;
             int64_t display_time_us = 0;
             reader_pagination_progress_t button_pagination_progress = {fb, &display, -100};
             ESP_LOGD(TAG, "button event %d on page %s", button, app_page_name(app.page));
+            last_activity_us = esp_timer_get_time();
             if (button == APP_BUTTON_POWER_LONG) {
-                schedule_app_configuration_save_with_backup(&app, 1);
+                if (save_app_configuration(&app, sd_mounted) != 0) {
+                    ESP_LOGW(TAG, "failed to save app state before sleep");
+                }
                 esp_display_sleep(&display);
+                esp_web_admin_stop();
+                esp_time_sync_stop();
+                (void)esp_power_light_sleep(1);
+                last_activity_us = esp_timer_get_time();
+                ui_render_page(fb, &app, &font);
+                if (esp_display_present(&display, fb) != 0) {
+                    ESP_LOGE(TAG, "failed to restore display after power-key wake");
+                }
+                if (provisioning_mode) {
+                    (void)esp_time_sync_start_provisioning_ap("AI-Reader-Setup");
+                    (void)esp_web_admin_start(sd_mounted, 1);
+                } else if (!app.power_saving_enabled) {
+                    esp_time_sync_start();
+                    (void)esp_web_admin_start(sd_mounted, 0);
+                }
                 continue;
             }
             if (library_snapshot.phase == ESP_ASYNC_RUNNING && app.page == APP_PAGE_HOME &&
@@ -666,6 +739,9 @@ void app_main(void) {
                 reader_library_set_progress_callback(NULL, NULL);
             }
             if (previous_page != APP_PAGE_WIFI_SETUP && app.page == APP_PAGE_WIFI_SETUP) {
+                esp_time_sync_start();
+                (void)esp_web_admin_start(sd_mounted, provisioning_mode);
+                wifi_session_deadline_us = -1;
                 esp_time_sync_load_credentials(app.wifi_ssid, sizeof(app.wifi_ssid),
                                                 app.wifi_password, sizeof(app.wifi_password));
                 app.wifi_scan_requested = 1;
@@ -704,23 +780,65 @@ void app_main(void) {
             if (app.time_sync_requested) {
                 ESP_LOGI(TAG, "time synchronization requested from Settings");
                 esp_time_sync_start();
+                wifi_session_deadline_us =
+                    esp_timer_get_time() + (int64_t)POWER_WIFI_SESSION_MS * 1000;
                 app.wifi_connected = esp_time_sync_wifi_connected();
                 app.time_synchronized = esp_time_sync_is_ready();
+                app.time_sync_requested = 0;
             }
-            if (app.weather_refreshes != previous_app.weather_refreshes &&
-                app.wifi_connected && esp_weather_request_update() == 0) {
-                long long request_minute = current_epoch_minute();
-                last_weather_request_minute = request_minute >= 0 ? request_minute : 0;
+            if (app.weather_refreshes != previous_app.weather_refreshes) {
+                weather_request_pending = 1;
+                esp_time_sync_start();
+                wifi_session_deadline_us =
+                    esp_timer_get_time() + (int64_t)POWER_WIFI_SESSION_MS * 1000;
+            }
+            if (app.power_saving_enabled != previous_app.power_saving_enabled) {
+                esp_power_set_enabled(app.power_saving_enabled);
+                esp_display_set_energy_saving(
+                    &display,
+                    app.power_saving_enabled ? (app_low_battery(&app) ? 2 : 1) : 0);
+                if (app.power_saving_enabled) {
+                    wifi_session_deadline_us =
+                        esp_timer_get_time() + (int64_t)POWER_WIFI_SESSION_MS * 1000;
+                } else {
+                    wifi_session_deadline_us = -1;
+                    esp_time_sync_start();
+                    (void)esp_web_admin_start(sd_mounted, provisioning_mode);
+                }
+            }
+            if (previous_page == APP_PAGE_WIFI_SETUP &&
+                app.page != APP_PAGE_WIFI_SETUP &&
+                app.power_saving_enabled && !provisioning_mode) {
+                wifi_session_deadline_us =
+                    esp_timer_get_time() + 5000LL * 1000LL;
             }
             button_state_changed = memcmp(&previous_app, &app, sizeof(app)) != 0;
             persistence_changed = persisted_app_state_changed(&previous_app, &app);
+            reader_content_changed =
+                app.page == APP_PAGE_READER &&
+                (previous_app.page != APP_PAGE_READER ||
+                 previous_app.current_book != app.current_book ||
+                 previous_app.reader_page != app.reader_page);
             if (button_state_changed) {
                 int present_result;
                 int64_t phase_started_us = esp_timer_get_time();
                 ui_render_page(fb, &app, &font);
                 render_time_us = esp_timer_get_time() - phase_started_us;
                 phase_started_us = esp_timer_get_time();
-                present_result = esp_display_present_auto(&display, fb);
+                /*
+                 * Entering a book and turning a page replace most of the text
+                 * pixels, so the generic dirty-box heuristic sees more than
+                 * 70% of the panel and promotes every turn to a full waveform.
+                 * Reader content is intentionally updated with the partial
+                 * waveform. The display driver still performs an occasional
+                 * full refresh after its cumulative ghosting limit.
+                 */
+                if (reader_content_changed) {
+                    present_result = esp_display_present_partial(
+                        &display, fb, 0, 32, GFX_WIDTH, GFX_HEIGHT - 32);
+                } else {
+                    present_result = esp_display_present_auto(&display, fb);
+                }
                 if (present_result != 0 &&
                     esp_display_present(&display, fb) != 0) {
                     ESP_LOGE(TAG, "failed to present button frame");
@@ -779,13 +897,24 @@ void app_main(void) {
             app.time_synchronized = time_ready;
             if (minute != last_clock_minute) {
                 last_clock_minute = minute;
-                status_changed = 1;
+                if (clock_refresh_due(&app, minute)) status_changed = 1;
             }
-            if (connected &&
+            if (!weather_request_pending && !esp_weather_is_busy() &&
+                (!app.power_saving_enabled || !app_low_battery(&app)) &&
                 (last_weather_request_minute < 0 ||
-                 (minute >= 0 && minute - last_weather_request_minute >= 30)) &&
-                esp_weather_is_configured() &&
+                 (minute >= 0 && minute - last_weather_request_minute >=
+                     (app.power_saving_enabled ? POWER_WEATHER_MINUTES : 30))) &&
+                esp_weather_is_configured()) {
+                weather_request_pending = 1;
+                if (!connected) esp_time_sync_start();
+                if (app.power_saving_enabled && !provisioning_mode) {
+                    wifi_session_deadline_us =
+                        esp_timer_get_time() + (int64_t)POWER_WIFI_SESSION_MS * 1000;
+                }
+            }
+            if (weather_request_pending && connected &&
                 esp_weather_request_update() == 0) {
+                weather_request_pending = 0;
                 last_weather_request_minute = minute >= 0 ? minute : 0;
             }
             {
@@ -812,6 +941,10 @@ void app_main(void) {
                         esp_display_present_partial(&display, fb, 0, 0, GFX_WIDTH, 32);
                     }
                     status_changed = 0;
+                    if (app.power_saving_enabled && !provisioning_mode &&
+                        app.page != APP_PAGE_WIFI_SETUP) {
+                        wifi_session_deadline_us = esp_timer_get_time() + 2000LL * 1000LL;
+                    }
                 }
             }
             if (minute >= 0 && (last_battery_sample_minute < 0 ||
@@ -824,18 +957,47 @@ void app_main(void) {
                     (battery_valid && battery_percent != app.battery_percent)) {
                     app.battery_valid = battery_valid;
                     app.battery_percent = battery_percent;
+                    esp_display_set_energy_saving(
+                        &display,
+                        app.power_saving_enabled
+                            ? (app_low_battery(&app) ? 2 : 1)
+                            : 0);
                     status_changed = 1;
                 }
                 last_battery_sample_minute = minute;
             }
             if (status_changed) {
-            ui_render_page(fb, &app, &font);
+                ui_render_page(fb, &app, &font);
                 int height = app.page == APP_PAGE_HOME ? 180 : 32;
                 if (esp_display_present_partial(&display, fb, 0, 0,
                                                 GFX_WIDTH, height) != 0) {
-                ESP_LOGW(TAG, "failed to update clock status strip");
+                    ESP_LOGW(TAG, "failed to update clock status strip");
+                }
+            }
+            if (app.power_saving_enabled && !provisioning_mode &&
+                app.page != APP_PAGE_WIFI_SETUP &&
+                wifi_session_deadline_us >= 0 &&
+                esp_timer_get_time() >= wifi_session_deadline_us &&
+                !weather_request_pending && !esp_weather_is_busy()) {
+                esp_web_admin_stop();
+                esp_time_sync_stop();
+                wifi_session_deadline_us = -1;
             }
         }
+        {
+            int64_t now_us = esp_timer_get_time();
+            if (app.power_saving_enabled &&
+                now_us - last_activity_us >=
+                    (int64_t)POWER_IDLE_SLEEP_MS * 1000 &&
+                !esp_time_sync_is_running() &&
+                !weather_request_pending && !esp_weather_is_busy() &&
+                library_snapshot.phase != ESP_ASYNC_RUNNING &&
+                pagination_snapshot.phase != ESP_ASYNC_RUNNING &&
+                app.page != APP_PAGE_WIFI_SETUP) {
+                if (esp_power_light_sleep(0)) {
+                    last_activity_us = esp_timer_get_time();
+                }
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(ESP_BUTTON_POLL_MS));
     }

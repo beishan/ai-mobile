@@ -188,6 +188,7 @@ void app_init(app_state_t *app) {
         app->book_repagination_preview_pages[i] = 0;
     }
     app->reader_page = 0;
+    app->reader_page_turn_pending = 0;
     app->reader_background_pagination_active = 0;
     app->reader_background_pagination_progress = 0;
     app->reader_menu_open = 0;
@@ -296,6 +297,7 @@ static void handle_bookshelf(app_state_t *app, app_button_t button) {
     } else if (button == APP_BUTTON_HOME) {
         ensure_reader_book_layout(app, app->bookshelf_selection);
         app->current_book = app->bookshelf_selection;
+        app->reader_page_turn_pending = 0;
         app->recent_book = app->current_book;
         app->page = APP_PAGE_READER;
         app->reader_page = app->book_current_pages[app->current_book];
@@ -336,6 +338,7 @@ static void handle_file_browser(app_state_t *app, app_button_t button) {
                 app->recent_book = 0;
                 app_sync_reader_library(app);
                 app->reader_page = 0;
+                app->reader_page_turn_pending = 0;
                 app->reader_menu_open = 0;
                 app->page = APP_PAGE_READER;
                 app->file_browser_error = 0;
@@ -381,12 +384,24 @@ static void handle_reader(app_state_t *app, app_button_t button) {
     if (button == APP_BUTTON_POWER) {
         return;
     } else if (button == APP_BUTTON_UP && app->reader_page > 0) {
+        app->reader_page_turn_pending = 0;
         app->reader_page--;
         sync_reader_page(app);
     } else if (button == APP_BUTTON_DOWN && app->reader_page < app->book_pages[app->current_book] - 1) {
+        app->reader_page_turn_pending = 0;
         app->reader_page++;
         sync_reader_page(app);
+    } else if (button == APP_BUTTON_DOWN &&
+               !reader_library_book_layout_complete(app->current_book)) {
+        /*
+         * The SD library initially exposes only the first few pages so a book
+         * opens quickly. Remember a turn requested at that temporary boundary;
+         * the background paginator will satisfy it as soon as the full page
+         * table is committed.
+         */
+        app->reader_page_turn_pending = 1;
     } else if (button == APP_BUTTON_HOME) {
+        app->reader_page_turn_pending = 0;
         app->reader_menu_open = 1;
         app->reader_menu_selection = 0;
         app->reader_catalog_open = 0;
@@ -452,6 +467,13 @@ void app_finish_background_pagination(app_state_t *app, int book_index) {
     }
     app->book_repagination_old_totals[book_index] = 0;
     app_sync_reader_library(app);
+    if (app->reader_page_turn_pending && app->current_book == book_index &&
+        page < new_total - 1) {
+        page++;
+    }
+    if (app->current_book == book_index) {
+        app->reader_page_turn_pending = 0;
+    }
     app->book_current_pages[book_index] = page;
     if (app->current_book == book_index) app->reader_page = page;
 }
@@ -831,6 +853,7 @@ void app_handle_button(app_state_t *app, app_button_t button) {
                 handle_file_browser(app, APP_BUTTON_POWER);
                 return;
             case APP_PAGE_READER:
+                app->reader_page_turn_pending = 0;
                 if (app->reader_menu_open) {
                     app->reader_menu_open = 0;
                 } else {

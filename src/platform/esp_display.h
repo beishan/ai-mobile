@@ -14,6 +14,7 @@ typedef struct {
     uint8_t *previous_frame;
     int previous_frame_valid;
     int hardware_ready;
+    int energy_saving_level;
     spi_device_handle_t spi;
     ssd1677_t controller;
 } esp_display_t;
@@ -30,5 +31,7 @@ int esp_display_present_auto(esp_display_t *display, const gfx_framebuffer_t *fb
 int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t *fb,
                                 int x, int y, int width, int height);
 void esp_display_sleep(esp_display_t *display);
+/* 0=normal, 1=power saving, 2=low battery power saving. */
+void esp_display_set_energy_saving(esp_display_t *display, int level);
 
 #endif

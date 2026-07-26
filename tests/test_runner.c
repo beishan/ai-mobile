@@ -701,7 +701,7 @@ static void test_reader_catalog_matches_design2_skeleton(void) {
     app_state_t app;
     font_t font;
 
-    ASSERT_EQ_INT(0, reader_library_load_book_file(0, "assets/books/santi.txt"));
+    ASSERT_EQ_INT(0, reader_library_load_book_file(0, "tests/fixtures/catalog.txt"));
     ASSERT_EQ_INT(1, font_load_default(&font));
     gfx_init(&fb);
     app_init(&app);
@@ -712,8 +712,8 @@ static void test_reader_catalog_matches_design2_skeleton(void) {
 
     assert_uses_home_status_bar(&fb);
     ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 40, 34, 360, 260) > 500);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 14, 62, 452, 52) > 220);
-    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 0, 735, GFX_WIDTH, 65) < 20);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 14, 86, 452, 50) > 220);
+    ASSERT_TRUE(count_color_in_region(&fb, GFX_BLACK, 22, 735, 436, 65) > 100);
     font_free(&font);
 }
 
@@ -890,6 +890,22 @@ static void test_reader_library_loads_supported_book_directory(void) {
     ASSERT_TRUE(reader_library_load_directory("assets/books/realbook") >= 2);
     ASSERT_TRUE(reader_library_page_count(0) >= 1);
     ASSERT_TRUE(reader_library_book(0)->file_type != NULL);
+}
+
+static void test_reader_remembers_turn_at_initial_pagination_boundary(void) {
+    app_state_t app;
+    ASSERT_TRUE(reader_library_load_directory("assets/books/realbook") >= 1);
+    app_init(&app);
+    app.page = APP_PAGE_READER;
+    app.current_book = 0;
+    app.reader_page = app.book_pages[0] - 1;
+    app.book_current_pages[0] = app.reader_page;
+    ASSERT_TRUE(!reader_library_book_layout_complete(0));
+
+    app_handle_button(&app, APP_BUTTON_DOWN);
+
+    ASSERT_EQ_INT(1, app.reader_page_turn_pending);
+    ASSERT_EQ_INT(app.book_pages[0] - 1, app.reader_page);
 }
 
 static void test_bookshelf_reflects_loaded_realbook_metadata(void) {
@@ -1098,6 +1114,36 @@ static void test_esp_input_wires_button_debounce(void) {
     ASSERT_TRUE(file_contains("src/platform/esp_board_config.h", "ESP_BUTTON_PIN_BACK 42"));
     ASSERT_TRUE(file_contains("src/main_esp.c", "esp_display_sleep"));
     ASSERT_TRUE(file_contains("src/CMakeLists.txt", "platform/input_debounce.c"));
+}
+
+static void test_esp_power_saving_controls_runtime_services(void) {
+    ASSERT_TRUE(file_contains("sdkconfig.defaults", "CONFIG_PM_ENABLE=y"));
+    ASSERT_TRUE(file_contains("sdkconfig.defaults", "CONFIG_FREERTOS_USE_TICKLESS_IDLE=y"));
+    ASSERT_TRUE(file_contains("src/platform/esp_power.c", "esp_pm_configure"));
+    ASSERT_TRUE(file_contains("src/platform/esp_power.c", "esp_light_sleep_start"));
+    ASSERT_TRUE(file_contains("src/platform/esp_power.c", "gpio_wakeup_enable"));
+    ASSERT_TRUE(file_contains("src/platform/esp_time_sync.c", "esp_time_sync_stop"));
+    ASSERT_TRUE(file_contains("src/platform/esp_time_sync.c", "esp_wifi_stop"));
+    ASSERT_TRUE(file_contains("src/platform/esp_web_admin.c", "esp_web_admin_stop"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "POWER_READER_CLOCK_MINUTES 10"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "POWER_LOW_BATTERY_PERCENT 15"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "POWER_IDLE_SLEEP_MS 30000"));
+}
+
+static void test_web_book_upload_refreshes_supported_library(void) {
+    ASSERT_TRUE(file_contains("src/web/admin.html", ".txt,.epub"));
+    ASSERT_TRUE(file_contains("src/web/admin.html", "new TextEncoder()"));
+    ASSERT_TRUE(file_contains("src/platform/esp_web_admin.c", "safe_filename(name, \".epub\")"));
+    ASSERT_TRUE(file_contains("src/platform/esp_web_admin.c", "STORAGE_IO_FOREGROUND"));
+    ASSERT_TRUE(file_contains("src/platform/esp_web_admin.c", "mark_books_changed"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "esp_web_admin_take_books_changed"));
+    ASSERT_TRUE(file_contains("src/main_esp.c", "start_sd_library_load(&app)"));
+    ASSERT_TRUE(file_contains("src/platform/esp_web_admin.c",
+                              "HTTP_UPLOAD_BUFFER_SIZE (16 * 1024)"));
+    ASSERT_TRUE(file_contains("src/platform/esp_web_admin.c",
+                              "malloc(HTTP_UPLOAD_BUFFER_SIZE)"));
+    ASSERT_TRUE(file_contains("src/platform/esp_board_config.h",
+                              "ESP_SD_SPI_HZ_KHZ 20000"));
 }
 
 static void test_sdl_key_mapping_for_core_buttons(void) {
@@ -1777,6 +1823,7 @@ int main(void) {
     test_bookshelf_reflects_loaded_realbook_metadata();
     test_reader_library_loads_external_real_books();
     test_reader_library_loads_supported_book_directory();
+    test_reader_remembers_turn_at_initial_pagination_boundary();
     test_entrypoints_load_external_books_on_startup();
     test_app_persistence_round_trips_reader_progress_and_settings();
     test_app_persistence_clamps_restored_values_to_current_limits();
@@ -1786,6 +1833,8 @@ int main(void) {
     test_app_persistence_nvs_backend_is_stubbed_on_host();
     test_esp_firmware_wires_app_persistence_to_nvs();
     test_esp_input_wires_button_debounce();
+    test_esp_power_saving_controls_runtime_services();
+    test_web_book_upload_refreshes_supported_library();
     test_sdl_key_mapping_for_core_buttons();
     test_back_button_returns_to_parent_page();
     test_input_debounce_emits_once_after_stable_press();

@@ -13,6 +13,8 @@ typedef struct {
 } esp_wifi_scan_result_t;
 
 void esp_time_sync_start(void);
+void esp_time_sync_stop(void);
+int esp_time_sync_is_running(void);
 int esp_time_sync_wait_for_time(int timeout_ms);
 int esp_time_sync_is_ready(void);
 int esp_time_sync_wifi_connected(void);

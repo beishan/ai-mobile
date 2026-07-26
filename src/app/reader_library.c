@@ -986,6 +986,13 @@ const char *reader_library_page_text(int book_index, int page_index) {
         page_text[0] = '\0';
     } else {
         snprintf(page_text, sizeof(page_text), "%s", entry->text);
+        /*
+         * Cache the next already-indexed page while this foreground request
+         * owns the SD bus. Otherwise the background full-book paginator can
+         * win the bus immediately after the current page is rendered and make
+         * an ordinary turn within the first 16 ready pages appear unresponsive.
+         */
+        (void)load_page_cache_entry(book_index, page_index + 1);
     }
     storage_io_unlock();
     return page_text;

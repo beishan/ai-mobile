@@ -890,30 +890,34 @@ static void reader_catalog_draw_triangle(gfx_framebuffer_t *fb, int x, int y) {
 }
 
 static void render_reader_catalog(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
+    const int row_height = 54;
+    const int visible_rows = (GFX_HEIGHT - STATUS_BAR_HEIGHT) / row_height;
     int chapter_count = reader_library_chapter_count(app->current_book);
-    int start = app->reader_catalog_selection >= 9 ? app->reader_catalog_selection - 8 : 0;
+    int start = app->reader_catalog_selection >= visible_rows
+                    ? app->reader_catalog_selection - visible_rows + 1
+                    : 0;
 
-    for (int row = 0; row < 9 && start + row < chapter_count; row++) {
+    for (int row = 0; row < visible_rows && start + row < chapter_count; row++) {
         int i = start + row;
-        int row_y = 22 + row * 52;
+        int row_y = STATUS_BAR_HEIGHT + row * row_height;
         int page = reader_library_chapter_page(app->current_book, i) + 1;
         char page_text[16];
         if (app->reader_catalog_selection == i) {
-            gfx_draw_rounded_rect_thick(fb, 14, row_y + 4, 452, 44, 4, 1, GFX_BLACK);
-            reader_catalog_draw_triangle(fb, 28, row_y + 20);
+            gfx_draw_rounded_rect_thick(fb, 14, row_y + 4, 452, 46, 4, 1, GFX_BLACK);
+            reader_catalog_draw_triangle(fb, 28, row_y + 21);
         } else if (i > 0) {
             gfx_fill_rect(fb, 22, row_y, 436, 1, GFX_BLACK);
         }
         snprintf(page_text, sizeof(page_text), "%d", page);
-        font_draw_text_builtin(20, fb, app->reader_catalog_selection == i ? 48 : 40, row_y + 17,
+        font_draw_text_builtin(20, fb, app->reader_catalog_selection == i ? 48 : 40, row_y + 18,
                                reader_library_chapter_title(app->current_book, i), GFX_BLACK);
-        font_draw_text_aligned_builtin(20, fb, 386, row_y + 17, 60, page_text, FONT_ALIGN_RIGHT, GFX_BLACK);
+        font_draw_text_aligned_builtin(20, fb, 386, row_y + 18, 60, page_text, FONT_ALIGN_RIGHT, GFX_BLACK);
     }
-    if (chapter_count > 9) {
+    if (chapter_count > visible_rows) {
         char position[32];
         snprintf(position, sizeof(position), "%d / %d",
                  app->reader_catalog_selection + 1, chapter_count);
-        font_draw_text_aligned_builtin(14, fb, 344, 506, 112,
+        font_draw_text_aligned_builtin(14, fb, 344, GFX_HEIGHT - 18, 112,
                                        position, FONT_ALIGN_RIGHT, GFX_BLACK);
     }
     home_status_bar(fb, font);
@@ -990,7 +994,12 @@ static void render_reader(gfx_framebuffer_t *fb, const app_state_t *app, const f
 
     snprintf(chapter_progress, sizeof(chapter_progress), "本章 %d / %d  |  全书还剩 %d 页",
              current_page, total_pages, total_pages > current_page ? total_pages - current_page : 0);
-    if (app->reader_background_pagination_active) {
+    if (app->reader_page_turn_pending) {
+        snprintf(chapter_progress, sizeof(chapter_progress),
+                 "下一页分页中  |  当前可读 %d 页", total_pages);
+        font_draw_text_aligned_builtin(14, fb, 180, 782, 275,
+                                       chapter_progress, FONT_ALIGN_RIGHT, GFX_BLACK);
+    } else if (app->reader_background_pagination_active) {
         snprintf(chapter_progress, sizeof(chapter_progress), "后台分页 %d%%  |  当前可读 %d 页",
                  app->reader_background_pagination_progress, total_pages);
         font_draw_text_aligned_builtin(14, fb, 180, 782, 275,

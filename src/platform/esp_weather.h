@@ -17,5 +17,6 @@ typedef struct {
 int esp_weather_is_configured(void);
 int esp_weather_request_update(void);
 int esp_weather_get_result(esp_weather_result_t *result);
+int esp_weather_is_busy(void);
 
 #endif

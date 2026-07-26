@@ -58,6 +58,7 @@ typedef struct {
     int reader_page;
     int reader_background_pagination_active;
     int reader_background_pagination_progress;
+    int reader_page_turn_pending;
     int reader_menu_open;
     int reader_menu_selection;
     int reader_catalog_open;

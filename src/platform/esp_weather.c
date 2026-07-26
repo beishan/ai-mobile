@@ -320,6 +320,10 @@ int esp_weather_request_update(void) {
     return 0;
 }
 
+int esp_weather_is_busy(void) {
+    return request_running ? 1 : 0;
+}
+
 int esp_weather_get_result(esp_weather_result_t *result) {
     if (result == NULL) return -1;
     if (result_mutex == NULL) result_mutex = xSemaphoreCreateMutex();

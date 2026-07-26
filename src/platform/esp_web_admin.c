@@ -20,6 +20,7 @@
 #include "nvs.h"
 #include "platform/esp_board_config.h"
 #include "platform/esp_config_backup.h"
+#include "platform/storage_io.h"
 #include "platform/esp_time_sync.h"
 #include "platform/esp_weather.h"
 
@@ -30,7 +31,7 @@
 #define BOOK_CACHE_TEMP BOOK_DIRECTORY "/.ai_mobile_index.tmp"
 #define BOOK_CACHE_BACKUP BOOK_DIRECTORY "/.ai_mobile_index.bak"
 #define WEATHER_NVS_NAMESPACE "qweather"
-#define HTTP_BUFFER_SIZE 2048
+#define HTTP_UPLOAD_BUFFER_SIZE (16 * 1024)
 
 extern const unsigned char web_admin_html_start[];
 extern const unsigned char web_admin_html_end[];
@@ -39,6 +40,8 @@ static const char *TAG = "web_admin";
 static httpd_handle_t admin_server;
 static int admin_sd_mounted;
 static int admin_provisioning;
+static int admin_books_changed;
+static portMUX_TYPE admin_change_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void set_json(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json; charset=utf-8");
@@ -111,8 +114,7 @@ static int safe_filename(const char *name, const char *extension) {
         strchr(name, '/') != NULL || strchr(name, '\\') != NULL) return 0;
     name_length = strlen(name);
     extension_length = strlen(extension);
-    /* Keep the percent-encoded query below HTTPD's 512-byte URI limit. */
-    if (name_length <= extension_length || name_length > 150) return 0;
+    if (name_length <= extension_length || name_length > 240) return 0;
     for (size_t i = 0; i < name_length; i++) {
         if ((unsigned char)name[i] < 0x20) return 0;
     }
@@ -123,16 +125,37 @@ static int safe_filename(const char *name, const char *extension) {
     return 1;
 }
 
-static const char *directory_for_type(const char *type, const char **extension) {
+static int filename_matches_type(const char *type, const char *name) {
     if (strcmp(type, "books") == 0) {
-        *extension = ".txt";
+        return safe_filename(name, ".txt") || safe_filename(name, ".epub");
+    }
+    if (strcmp(type, "fonts") == 0) return safe_filename(name, ".bin");
+    return 0;
+}
+
+static const char *directory_for_type(const char *type) {
+    if (strcmp(type, "books") == 0) {
         return BOOK_DIRECTORY;
     }
     if (strcmp(type, "fonts") == 0) {
-        *extension = ".bin";
         return FONT_DIRECTORY;
     }
     return NULL;
+}
+
+static void mark_books_changed(void) {
+    portENTER_CRITICAL(&admin_change_lock);
+    admin_books_changed = 1;
+    portEXIT_CRITICAL(&admin_change_lock);
+}
+
+int esp_web_admin_take_books_changed(void) {
+    int changed;
+    portENTER_CRITICAL(&admin_change_lock);
+    changed = admin_books_changed;
+    admin_books_changed = 0;
+    portEXIT_CRITICAL(&admin_change_lock);
+    return changed;
 }
 
 static void invalidate_book_cache(void) {
@@ -257,16 +280,16 @@ static esp_err_t weather_save_handler(httpd_req_t *req) {
 
 static int request_file_parameters(httpd_req_t *req, char *type, size_t type_size,
                                    char *name, size_t name_size,
-                                   const char **directory, const char **extension) {
+                                   const char **directory) {
     char query[512];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
         httpd_query_key_value(query, "type", type, type_size) != ESP_OK) return -1;
-    *directory = directory_for_type(type, extension);
+    *directory = directory_for_type(type);
     if (*directory == NULL) return -1;
     if (name != NULL) {
         if (httpd_query_key_value(query, "name", name, name_size) != ESP_OK) return -1;
         url_decode(name);
-        if (!safe_filename(name, *extension)) return -1;
+        if (!filename_matches_type(type, name)) return -1;
     }
     return 0;
 }
@@ -274,15 +297,15 @@ static int request_file_parameters(httpd_req_t *req, char *type, size_t type_siz
 static esp_err_t files_list_handler(httpd_req_t *req) {
     char type[16];
     const char *directory;
-    const char *extension;
     DIR *dir;
     struct dirent *entry;
     if (request_file_parameters(req, type, sizeof(type), NULL, 0,
-                                &directory, &extension) != 0) {
+                                &directory) != 0) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid file type");
     }
     set_json(req);
     httpd_resp_send_chunk(req, "[", 1);
+    storage_io_lock(STORAGE_IO_FOREGROUND);
     dir = admin_sd_mounted ? opendir(directory) : NULL;
     int first = 1;
     while (dir != NULL && (entry = readdir(dir)) != NULL) {
@@ -290,7 +313,7 @@ static esp_err_t files_list_handler(httpd_req_t *req) {
         char escaped[500];
         char item[700];
         struct stat info;
-        if (!safe_filename(entry->d_name, extension)) continue;
+        if (!filename_matches_type(type, entry->d_name)) continue;
         snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
         if (stat(path, &info) != 0 || S_ISDIR(info.st_mode)) continue;
         json_escape(entry->d_name, escaped, sizeof(escaped));
@@ -300,48 +323,94 @@ static esp_err_t files_list_handler(httpd_req_t *req) {
         httpd_resp_sendstr_chunk(req, item);
     }
     if (dir != NULL) closedir(dir);
+    storage_io_unlock();
     if (httpd_resp_send_chunk(req, "]", 1) != ESP_OK) return ESP_FAIL;
     return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+static int receive_exact(httpd_req_t *req, char *buffer, int length) {
+    int received_total = 0;
+    while (received_total < length) {
+        int received = httpd_req_recv(req, buffer + received_total,
+                                      length - received_total);
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (received <= 0) return -1;
+        received_total += received;
+    }
+    return 0;
 }
 
 static esp_err_t file_upload_handler(httpd_req_t *req) {
     char type[16];
     char name[256];
     char path[512];
-    char buffer[HTTP_BUFFER_SIZE];
+    char *buffer;
     const char *directory;
-    const char *extension;
     FILE *file;
     int remaining = req->content_len;
     size_t max_size;
-    if (!admin_sd_mounted || request_file_parameters(req, type, sizeof(type), name, sizeof(name),
-                                                     &directory, &extension) != 0) {
+    unsigned char name_size_bytes[2];
+    int name_length;
+    if (!admin_sd_mounted || request_file_parameters(req, type, sizeof(type), NULL, 0,
+                                                     &directory) != 0 ||
+        remaining < 3 ||
+        receive_exact(req, (char *)name_size_bytes, sizeof(name_size_bytes)) != 0) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid upload");
+    }
+    remaining -= (int)sizeof(name_size_bytes);
+    name_length = name_size_bytes[0] | (name_size_bytes[1] << 8);
+    if (name_length <= 0 || name_length >= (int)sizeof(name) ||
+        name_length >= remaining ||
+        receive_exact(req, name, name_length) != 0) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid filename");
+    }
+    name[name_length] = '\0';
+    remaining -= name_length;
+    if (!filename_matches_type(type, name)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unsupported filename");
     }
     max_size = strcmp(type, "books") == 0 ? 32U * 1024U * 1024U : 16U * 1024U * 1024U;
     if (remaining <= 0 || (size_t)remaining > max_size) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "file size rejected");
     }
+    buffer = malloc(HTTP_UPLOAD_BUFFER_SIZE);
+    if (buffer == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "upload buffer unavailable");
+    }
+    storage_io_lock(STORAGE_IO_FOREGROUND);
     mkdir(directory, 0775);
     snprintf(path, sizeof(path), "%s/%s", directory, name);
     file = fopen(path, "wb");
-    if (file == NULL) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "open failed");
+    if (file == NULL) {
+        storage_io_unlock();
+        free(buffer);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "open failed");
+    }
     while (remaining > 0) {
-        int wanted = remaining > (int)sizeof(buffer) ? (int)sizeof(buffer) : remaining;
-        int received = httpd_req_recv(req, buffer, wanted);
-        if (received == HTTPD_SOCK_ERR_TIMEOUT) continue;
-        if (received <= 0 || fwrite(buffer, 1, (size_t)received, file) != (size_t)received) {
+        int wanted = remaining > HTTP_UPLOAD_BUFFER_SIZE
+                         ? HTTP_UPLOAD_BUFFER_SIZE
+                         : remaining;
+        if (receive_exact(req, buffer, wanted) != 0 ||
+            fwrite(buffer, 1, (size_t)wanted, file) != (size_t)wanted) {
             fclose(file);
             unlink(path);
+            storage_io_unlock();
+            free(buffer);
             return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
         }
-        remaining -= received;
+        remaining -= wanted;
     }
     fclose(file);
-    if (strcmp(type, "books") == 0) invalidate_book_cache();
+    free(buffer);
+    if (strcmp(type, "books") == 0) {
+        invalidate_book_cache();
+        mark_books_changed();
+    }
+    storage_io_unlock();
     ESP_LOGI(TAG, "uploaded %s", path);
     set_json(req);
-    return httpd_resp_sendstr(req, "{\"ok\":true,\"restart_recommended\":true}");
+    return httpd_resp_sendstr(req, "{\"ok\":true,\"library_refreshing\":true}");
 }
 
 static esp_err_t file_delete_handler(httpd_req_t *req) {
@@ -349,14 +418,21 @@ static esp_err_t file_delete_handler(httpd_req_t *req) {
     char name[256];
     char path[512];
     const char *directory;
-    const char *extension;
     if (!admin_sd_mounted || request_file_parameters(req, type, sizeof(type), name, sizeof(name),
-                                                     &directory, &extension) != 0) {
+                                                     &directory) != 0) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid delete");
     }
     snprintf(path, sizeof(path), "%s/%s", directory, name);
-    if (unlink(path) != 0) return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "file not found");
-    if (strcmp(type, "books") == 0) invalidate_book_cache();
+    storage_io_lock(STORAGE_IO_FOREGROUND);
+    if (unlink(path) != 0) {
+        storage_io_unlock();
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "file not found");
+    }
+    if (strcmp(type, "books") == 0) {
+        invalidate_book_cache();
+        mark_books_changed();
+    }
+    storage_io_unlock();
     ESP_LOGI(TAG, "deleted %s", path);
     set_json(req);
     return httpd_resp_sendstr(req, "{\"ok\":true,\"restart_recommended\":true}");
@@ -430,4 +506,19 @@ int esp_web_admin_start(int sd_mounted, int provisioning_mode) {
     }
     ESP_LOGI(TAG, "web admin started in %s mode", provisioning_mode ? "provisioning" : "LAN");
     return 0;
+}
+
+void esp_web_admin_stop(void) {
+    if (admin_server != NULL) {
+        if (httpd_stop(admin_server) != ESP_OK) {
+            ESP_LOGW(TAG, "failed to stop web admin");
+            return;
+        }
+        admin_server = NULL;
+        ESP_LOGI(TAG, "web admin stopped");
+    }
+}
+
+int esp_web_admin_is_running(void) {
+    return admin_server != NULL;
 }

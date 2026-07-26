@@ -26,6 +26,7 @@ idf_component_register(
         "platform/esp_time_sync.c"
         "platform/esp_weather.c"
         "platform/esp_battery.c"
+        "platform/esp_power.c"
         "platform/esp_config_backup.c"
         "platform/esp_web_admin.c"
         "web/admin_html.S"
@@ -44,6 +45,7 @@ idf_component_register(
         esp_http_server
         esp_http_client
         esp_adc
+        esp_pm
         mbedtls
         log
         lwip

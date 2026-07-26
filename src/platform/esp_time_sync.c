@@ -41,6 +41,7 @@ static EventGroupHandle_t sync_events;
 static int started;
 static int sntp_started;
 static int scan_driver_started;
+static int wifi_initialized;
 static volatile int station_connected;
 
 static int load_saved_list(nvs_handle_t handle, saved_wifi_list_t *list) {
@@ -85,6 +86,7 @@ int esp_time_sync_start_provisioning_ap(const char *ap_ssid) {
         esp_netif_t *station_netif = esp_netif_create_default_wifi_sta();
         if (station_netif != NULL) esp_netif_set_hostname(station_netif, "ai-reader");
         if (esp_wifi_init(&wifi_init) != ESP_OK) return -1;
+        wifi_initialized = 1;
     } else {
         ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
     }
@@ -112,6 +114,7 @@ int esp_time_sync_start_provisioning_ap(const char *ap_ssid) {
         }
     }
     scan_driver_started = 1;
+    started = 1;
     ESP_LOGI(TAG, "provisioning access point started: %s", ap_ssid);
     return 0;
 }
@@ -123,6 +126,9 @@ int esp_time_sync_scan_networks(esp_wifi_scan_result_t *results, int max_results
     esp_err_t err;
     if (results == NULL || max_results <= 0) return -1;
     if (max_results > ESP_WIFI_SCAN_MAX) max_results = ESP_WIFI_SCAN_MAX;
+    if (!started && esp_time_sync_has_credentials()) {
+        esp_time_sync_start();
+    }
     if (!started && !scan_driver_started) {
         wifi_init_config_t wifi_init = WIFI_INIT_CONFIG_DEFAULT();
         err = esp_netif_init();
@@ -133,7 +139,9 @@ int esp_time_sync_scan_networks(esp_wifi_scan_result_t *results, int max_results
         if (esp_wifi_init(&wifi_init) != ESP_OK ||
             esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK ||
             esp_wifi_start() != ESP_OK) return -1;
+        wifi_initialized = 1;
         scan_driver_started = 1;
+        started = 1;
     }
     scan_config.show_hidden = false;
     if (esp_wifi_scan_start(&scan_config, true) != ESP_OK) return -1;
@@ -243,13 +251,15 @@ static void wifi_event_handler(void *argument, esp_event_base_t event_base,
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         station_connected = 0;
-        xEventGroupClearBits(sync_events, WIFI_CONNECTED_BIT);
-        ESP_LOGW(TAG, "Wi-Fi disconnected; retrying");
-        esp_wifi_connect();
+        if (sync_events != NULL) xEventGroupClearBits(sync_events, WIFI_CONNECTED_BIT);
+        if (started) {
+            ESP_LOGW(TAG, "Wi-Fi disconnected; retrying");
+            esp_wifi_connect();
+        }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         station_connected = 1;
-        xEventGroupSetBits(sync_events, WIFI_CONNECTED_BIT);
+        if (sync_events != NULL) xEventGroupSetBits(sync_events, WIFI_CONNECTED_BIT);
         ESP_LOGI(TAG, "Wi-Fi connected: " IPSTR " (web: http://ai-reader/)",
                  IP2STR(&event->ip_info.ip));
         start_sntp();
@@ -263,9 +273,7 @@ void esp_time_sync_start(void) {
     char password[sizeof(station.sta.password)];
     esp_err_t err;
 
-    if (started) {
-        return;
-    }
+    if (started) return;
     setenv("TZ", ESP_TIMEZONE, 1);
     tzset();
     if (esp_time_sync_load_credentials(ssid, sizeof(ssid), password, sizeof(password)) != 0) {
@@ -273,27 +281,37 @@ void esp_time_sync_start(void) {
         return;
     }
 
-    sync_events = xEventGroupCreate();
     if (sync_events == NULL) {
-        ESP_LOGE(TAG, "failed to create time-sync event group");
-        return;
+        sync_events = xEventGroupCreate();
+        if (sync_events == NULL) {
+            ESP_LOGE(TAG, "failed to create time-sync event group");
+            return;
+        }
     }
-    if (esp_netif_init() != ESP_OK) {
-        ESP_LOGE(TAG, "failed to initialize TCP/IP stack");
-        return;
-    }
-    err = esp_event_loop_create_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "failed to create default event loop: %s", esp_err_to_name(err));
-        return;
-    }
-    esp_netif_t *station_netif = esp_netif_create_default_wifi_sta();
-    if (station_netif != NULL) esp_netif_set_hostname(station_netif, "ai-reader");
-    if (esp_wifi_init(&wifi_init) != ESP_OK ||
-        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL) != ESP_OK ||
-        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL) != ESP_OK) {
-        ESP_LOGE(TAG, "failed to initialize Wi-Fi event handlers");
-        return;
+    if (!wifi_initialized) {
+        err = esp_netif_init();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "failed to initialize TCP/IP stack");
+            return;
+        }
+        err = esp_event_loop_create_default();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "failed to create default event loop: %s", esp_err_to_name(err));
+            return;
+        }
+        esp_netif_t *station_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (station_netif == NULL) station_netif = esp_netif_create_default_wifi_sta();
+        if (station_netif != NULL) esp_netif_set_hostname(station_netif, "ai-reader");
+        if (esp_wifi_init(&wifi_init) != ESP_OK ||
+            esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                       wifi_event_handler, NULL) != ESP_OK ||
+            esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                       wifi_event_handler, NULL) != ESP_OK) {
+            ESP_LOGE(TAG, "failed to initialize Wi-Fi event handlers");
+            return;
+        }
+        wifi_initialized = 1;
+        scan_driver_started = 1;
     }
     snprintf((char *)station.sta.ssid, sizeof(station.sta.ssid), "%s", ssid);
     snprintf((char *)station.sta.password, sizeof(station.sta.password), "%s", password);
@@ -307,6 +325,28 @@ void esp_time_sync_start(void) {
     }
     started = 1;
     ESP_LOGI(TAG, "Wi-Fi station started for SSID=%s", ssid);
+}
+
+void esp_time_sync_stop(void) {
+    if (sntp_started) {
+        esp_sntp_stop();
+        sntp_started = 0;
+    }
+    if (started) {
+        started = 0;
+        station_connected = 0;
+        if (sync_events != NULL) xEventGroupClearBits(sync_events, WIFI_CONNECTED_BIT);
+        (void)esp_wifi_disconnect();
+        if (esp_wifi_stop() != ESP_OK) {
+            ESP_LOGW(TAG, "failed to stop Wi-Fi radio");
+        } else {
+            ESP_LOGI(TAG, "Wi-Fi radio stopped");
+        }
+    }
+}
+
+int esp_time_sync_is_running(void) {
+    return started ? 1 : 0;
 }
 
 int esp_time_sync_wait_for_time(int timeout_ms) {
