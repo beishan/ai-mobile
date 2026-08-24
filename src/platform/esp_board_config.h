@@ -5,7 +5,7 @@
  * ESP32-S3 N16R8 阅读器——硬件配置与接线总表
  * ================================================================
  * 本文件集中配置以下硬件模块：
- *   1. 4.26 英寸 480x800 黑白墨水屏（SSD1677，SPI）
+ *   1. 可选 4.26 英寸 SSD1677 或 3.7 英寸 HINK-E037A03-A1 墨水屏
  *   2. PCB 板载 MicroSD 卡座（SDSPI/FAT32，与墨水屏共享 SPI 总线）
  *   3. BACK / POWER / UP / HOME / DOWN 五个低电平有效按键
  *   4. SPI 频率、复位时序、BUSY 超时及 SD 卡挂载路径
@@ -24,10 +24,11 @@
 /* ----------------------------------------------------------------
  * 模块一：SSD1677 墨水屏参数
  * ---------------------------------------------------------------- */
-#define ESP_EPD_PANEL_NAME "4.26in 480x800 BW E-Ink"
-#define ESP_EPD_DRIVER_IC "SSD1677"
-#define ESP_EPD_WIDTH 480
-#define ESP_EPD_HEIGHT 800
+#include "platform/epd_panel.h"
+#define ESP_EPD_PANEL_NAME EPD_PANEL_NAME
+#define ESP_EPD_DRIVER_IC EPD_DRIVER_NAME
+#define ESP_EPD_WIDTH EPD_NATIVE_WIDTH
+#define ESP_EPD_HEIGHT EPD_NATIVE_HEIGHT
 
 /*
  * 墨水屏 -> ESP32-S3 接线：
@@ -48,7 +49,7 @@
 #define ESP_EPD_PIN_CS 5     /* MCU -> EPD：独立片选，低有效 */
 #define ESP_EPD_PIN_SCK 18   /* MCU -> EPD/SD：共享 SPI 时钟 */
 #define ESP_EPD_PIN_SDA 17   /* MCU -> EPD/SD：共享 SPI MOSI */
-#define ESP_EPD_BUSY_ACTIVE_LEVEL 1 /* 与已点亮的 ping_test 实机配置一致：高电平忙 */
+#define ESP_EPD_BUSY_ACTIVE_LEVEL EPD_BUSY_ACTIVE_LEVEL
 
 /*
  * ----------------------------------------------------------------

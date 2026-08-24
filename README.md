@@ -1,12 +1,12 @@
 # AI Mobile E-Ink Reader
 
-ESP32-S3 reader firmware and desktop simulators for a 4.26 inch 480 x 800 black/white high-refresh E-Ink panel.
+ESP32-S3 reader firmware and desktop simulators for selectable black/white E-Ink panels.
 
 Current hardware target:
 
 - MCU: ESP32-S3 N16R8.
-- Panel: 4.26 inch 480 x 800 black/white E-Ink.
-- Driver IC: SSD1677.
+- Panels: OSPTEK 4.26 inch 480 x 800 (default), or HINK-E037A03-A1 3.7 inch 240 x 416.
+- Driver ICs: SSD1677 or UC8171/IL0324.
 - Display interface: SPI.
 - Framebuffer: one 1bpp black/white plane, 48,000 bytes per frame.
 
@@ -74,6 +74,20 @@ Build firmware:
 pio run -e esp32-n16r8
 ```
 
+Build the HINK-E037A03-A1 firmware:
+
+```bash
+pio run -e esp32-n16r8-hink-e037a03-a1
+```
+
+The HINK target keeps the 480 x 800 logical UI and scales its 1bpp output to
+the native 240 x 416 portrait panel. Its physical frame is 12,480 bytes and
+BUSY is active-low. Use the same GPIO-level SPI signals listed below when the
+panel is connected through a compatible 24-pin EPD power/adapter circuit.
+Do not plug the bare HINK FPC into the existing SSD1677 PCB until its FPC pinout
+and high-voltage reference circuit have been checked against the exact panel
+datasheet.
+
 Upload firmware:
 
 ```bash
@@ -88,10 +102,12 @@ pio device monitor -e esp32-n16r8
 
 Hardware status:
 
-- `src/platform/esp_board_config.h` centralizes the SSD1677 SPI wiring and panel constants.
-- `src/platform/epd_frame.c` packs the shared framebuffer into a single 48,000-byte black/white 1bpp plane.
+- `src/platform/epd_panel.h` selects panel geometry, controller family, frame size, and BUSY polarity at compile time.
+- `src/platform/esp_board_config.h` centralizes the shared SPI wiring and timing constants.
+- `src/platform/epd_frame.c` packs the shared framebuffer into the selected panel's black/white 1bpp plane.
 - `src/platform/ssd1677.c` implements SSD1677 reset-time setup, RAM addressing, full-frame transfer, refresh, BUSY synchronization, power-off, and deep sleep.
-- `src/platform/esp_display.c` connects the SSD1677 command driver to ESP-IDF GPIO/SPI and transfers the 180-degree rotated 48,000-byte frame for the current panel mounting.
+- `src/platform/il0324.c` implements the HINK 240 x 416 UC8171/IL0324 command sequence, full/partial transfer, refresh, and sleep.
+- `src/platform/esp_display.c` connects the selected controller to ESP-IDF GPIO/SPI.
 - `src/platform/esp_input.c` scans BACK/POWER/UP/HOME/DOWN in a dedicated 20ms FreeRTOS task, applies 40ms debounce, and queues events while E-Ink refresh blocks the UI loop.
 - `src/platform/esp_sd.c` mounts a FAT-formatted SPI SD card at `/sdcard`; startup indexes alphabetically sorted `.txt` and `.epub` files from `/sdcard/books`.
 - POWER long press is detected after 1200ms, synchronously saves reading state, sleeps the SSD1677, stops Wi-Fi/Web services, and enters GPIO-wakeable light sleep.

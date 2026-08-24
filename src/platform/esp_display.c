@@ -14,7 +14,8 @@
 #include "freertos/task.h"
 #include "platform/esp_board_config.h"
 #include "platform/epd_frame.h"
-#include "platform/ssd1677.h"
+#include "platform/epd_controller.h"
+#include "platform/epd_panel.h"
 
 static const char *TAG = "esp_display";
 static epd_frame_t packed_frame;
@@ -22,7 +23,7 @@ static epd_frame_t packed_frame;
 static void esp_display_remember_area(esp_display_t *display,
                                       int native_x, int native_y,
                                       int native_width, int native_height) {
-    const int row_bytes = SSD1677_PANEL_WIDTH / 8;
+    const int row_bytes = EPD_NATIVE_WIDTH / 8;
     int byte_x;
     int byte_width;
 
@@ -166,7 +167,7 @@ void esp_display_init(esp_display_t *display) {
             display->hardware_ready = 0;
             ESP_LOGW(TAG, "EPD hardware reset failed");
         } else {
-            ssd1677_io_t io = {
+            epd_controller_io_t io = {
                 .context = display,
                 .write_command = NULL,
                 .write_data = NULL,
@@ -177,11 +178,11 @@ void esp_display_init(esp_display_t *display) {
             io.write_data = esp_display_controller_write_data;
             io.wait_busy = esp_display_controller_wait_busy;
             io.delay_ms = esp_display_controller_delay_ms;
-            if (ssd1677_init(&display->controller, &io) != 0) {
+            if (epd_controller_init(&display->controller, &io) != 0) {
                 display->hardware_ready = 0;
-                ESP_LOGE(TAG, "SSD1677 controller initialization failed");
+                ESP_LOGE(TAG, "%s controller initialization failed", EPD_DRIVER_NAME);
             } else {
-                ESP_LOGI(TAG, "SSD1677 controller initialized");
+                ESP_LOGI(TAG, "%s controller initialized", EPD_DRIVER_NAME);
             }
         }
     }
@@ -311,15 +312,15 @@ int esp_display_present(esp_display_t *display, const gfx_framebuffer_t *fb) {
         return -1;
     }
     if (display->controller.sleeping || !display->controller.initialized) {
-        ssd1677_io_t io = display->controller.io;
+        epd_controller_io_t io = display->controller.io;
         if (esp_display_reset(display) != 0 ||
-            ssd1677_init(&display->controller, &io) != 0) {
-            ESP_LOGE(TAG, "failed to wake and reinitialize SSD1677");
+            epd_controller_init(&display->controller, &io) != 0) {
+            ESP_LOGE(TAG, "failed to wake and reinitialize %s", EPD_DRIVER_NAME);
             return -1;
         }
     }
-    if (ssd1677_present(&display->controller, packed_frame.bw, sizeof(packed_frame.bw)) != 0) {
-        ESP_LOGE(TAG, "SSD1677 frame transfer or refresh failed");
+    if (epd_controller_present(&display->controller, packed_frame.bw, sizeof(packed_frame.bw)) != 0) {
+        ESP_LOGE(TAG, "%s frame transfer or refresh failed", EPD_DRIVER_NAME);
         return -1;
     }
 
@@ -330,7 +331,8 @@ int esp_display_present(esp_display_t *display, const gfx_framebuffer_t *fb) {
         memcpy(display->previous_frame, packed_frame.bw, EPD_FRAME_BYTES);
         display->previous_frame_valid = 1;
     }
-    ESP_LOGI(TAG, "present SSD1677 BW frame %d: bytes=%d black=%d bw_sum=%08x",
+    ESP_LOGI(TAG, "present %s BW frame %d: bytes=%d black=%d bw_sum=%08x",
+             EPD_DRIVER_NAME,
              display->refresh_count,
              EPD_FRAME_BYTES,
              black,
@@ -377,7 +379,7 @@ int esp_display_present_auto(esp_display_t *display, const gfx_framebuffer_t *fb
     }
 
     dirty_area = (uint32_t)native_width * (uint32_t)native_height;
-    full_area = (uint32_t)SSD1677_PANEL_WIDTH * (uint32_t)SSD1677_PANEL_HEIGHT;
+    full_area = (uint32_t)EPD_NATIVE_WIDTH * (uint32_t)EPD_NATIVE_HEIGHT;
     if (dirty_area * 100u >= full_area * ESP_EPD_AUTO_FULL_AREA_PERCENT) {
         ESP_LOGI(TAG,
                  "automatic refresh selected full update: area=%u/%u changed_bytes=%u",
@@ -386,11 +388,18 @@ int esp_display_present_auto(esp_display_t *display, const gfx_framebuffer_t *fb
         return esp_display_present(display, fb);
     }
 
+#if EPD_NATIVE_PORTRAIT
+    ui_x = native_x * GFX_WIDTH / EPD_NATIVE_WIDTH;
+    ui_y = native_y * GFX_HEIGHT / EPD_NATIVE_HEIGHT;
+    ui_width = (native_width * GFX_WIDTH + EPD_NATIVE_WIDTH - 1) / EPD_NATIVE_WIDTH;
+    ui_height = (native_height * GFX_HEIGHT + EPD_NATIVE_HEIGHT - 1) / EPD_NATIVE_HEIGHT;
+#else
     /* Convert the native 800x480 diff box back to portrait UI coordinates. */
-    ui_x = SSD1677_PANEL_HEIGHT - (native_y + native_height);
+    ui_x = EPD_NATIVE_HEIGHT - (native_y + native_height);
     ui_y = native_x;
     ui_width = native_height;
     ui_height = native_width;
+#endif
     ESP_LOGD(TAG,
              "automatic refresh selected partial update: ui=(%d,%d %dx%d) changed_bytes=%u",
              ui_x, ui_y, ui_width, ui_height, (unsigned int)changed_bytes);
@@ -448,17 +457,26 @@ int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t 
     }
 #endif
 
+#if EPD_NATIVE_PORTRAIT
+    native_x = x * EPD_NATIVE_WIDTH / GFX_WIDTH;
+    native_y = y * EPD_NATIVE_HEIGHT / GFX_HEIGHT;
+    x_end = (x_end * EPD_NATIVE_WIDTH + GFX_WIDTH - 1) / GFX_WIDTH;
+    y_end = (y_end * EPD_NATIVE_HEIGHT + GFX_HEIGHT - 1) / GFX_HEIGHT;
+    native_width = x_end - native_x;
+    native_height = y_end - native_y;
+#else
     /* Portrait UI is rotated 180 degrees into SSD1677 native RAM (800x480). */
     native_x = y;
-    native_y = SSD1677_PANEL_HEIGHT - x_end;
+    native_y = EPD_NATIVE_HEIGHT - x_end;
     native_width = y_end - y;
     native_height = x_end - x;
+#endif
 
     /* SSD1677 source windows are byte-addressed: expand to whole bytes. */
     x_end = native_x + native_width;
     native_x &= ~7;
     x_end = (x_end + 7) & ~7;
-    if (x_end > SSD1677_PANEL_WIDTH) x_end = SSD1677_PANEL_WIDTH;
+    if (x_end > EPD_NATIVE_WIDTH) x_end = EPD_NATIVE_WIDTH;
     native_width = x_end - native_x;
 
     if (epd_frame_pack_partial(fb, &packed_frame,
@@ -471,17 +489,17 @@ int esp_display_present_partial(esp_display_t *display, const gfx_framebuffer_t 
         return -1;
     }
     if (display->controller.sleeping || !display->controller.initialized) {
-        ssd1677_io_t io = display->controller.io;
+        epd_controller_io_t io = display->controller.io;
         if (esp_display_reset(display) != 0 ||
-            ssd1677_init(&display->controller, &io) != 0) {
-            ESP_LOGE(TAG, "failed to wake SSD1677 for partial refresh");
+            epd_controller_init(&display->controller, &io) != 0) {
+            ESP_LOGE(TAG, "failed to wake %s for partial refresh", EPD_DRIVER_NAME);
             return -1;
         }
     }
-    if (ssd1677_present_partial(&display->controller, packed_frame.bw,
+    if (epd_controller_present_partial(&display->controller, packed_frame.bw,
                                 sizeof(packed_frame.bw), native_x, native_y,
                                 native_width, native_height) != 0) {
-        ESP_LOGE(TAG, "SSD1677 partial transfer or refresh failed");
+        ESP_LOGE(TAG, "%s partial transfer or refresh failed", EPD_DRIVER_NAME);
         return -1;
     }
 
@@ -511,12 +529,12 @@ void esp_display_sleep(esp_display_t *display) {
         ESP_LOGW(TAG, "display sleep ignored: hardware is not ready");
         return;
     }
-    if (ssd1677_sleep(&display->controller) != 0) {
-        ESP_LOGE(TAG, "SSD1677 deep sleep command failed");
+    if (epd_controller_sleep(&display->controller) != 0) {
+        ESP_LOGE(TAG, "%s deep sleep command failed", EPD_DRIVER_NAME);
         return;
     }
     display->previous_frame_valid = 0;
-    ESP_LOGI(TAG, "SSD1677 entered deep sleep after %d frame(s)", display->refresh_count);
+    ESP_LOGI(TAG, "%s entered deep sleep after %d frame(s)", EPD_DRIVER_NAME, display->refresh_count);
 }
 
 void esp_display_set_energy_saving(esp_display_t *display, int level) {

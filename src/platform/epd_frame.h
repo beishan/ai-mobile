@@ -2,10 +2,8 @@
 #define EPD_FRAME_H
 
 #include "gfx/gfx.h"
-#include "platform/ssd1677.h"
+#include "platform/epd_panel.h"
 #include <stddef.h>
-
-#define EPD_FRAME_BYTES SSD1677_FRAME_BYTES
 
 typedef struct {
     unsigned char bw[EPD_FRAME_BYTES];

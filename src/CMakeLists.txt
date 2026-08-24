@@ -17,6 +17,7 @@ idf_component_register(
         "font/font_metadata.c"
         "platform/epd_frame.c"
         "platform/ssd1677.c"
+        "platform/il0324.c"
         "platform/input_debounce.c"
         "platform/storage_io.c"
         "platform/esp_display.c"

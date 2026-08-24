@@ -3,7 +3,7 @@
 
 #include "driver/spi_master.h"
 #include "gfx/gfx.h"
-#include "platform/ssd1677.h"
+#include "platform/epd_controller.h"
 #include <stdint.h>
 
 typedef struct {
@@ -16,7 +16,7 @@ typedef struct {
     int hardware_ready;
     int energy_saving_level;
     spi_device_handle_t spi;
-    ssd1677_t controller;
+    epd_controller_t controller;
 } esp_display_t;
 
 void esp_display_init(esp_display_t *display);
