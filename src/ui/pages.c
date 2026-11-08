@@ -1568,8 +1568,7 @@ static void draw_section_header(gfx_framebuffer_t *fb, int x, int y, const char 
 static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const font_t *font) {
     const char *cities[] = {"北京市", "上海市", "杭州市"};
     int city = app->weather_city_index;
-    int scroll = app->settings_scroll;
-    const int title_y = 80 - scroll;
+    const int title_y = 80;
     const int section_x = 32;
     const int group_x = 27;
     const int group_w = 428;
@@ -1583,70 +1582,75 @@ static void render_settings(gfx_framebuffer_t *fb, const app_state_t *app, const
 
     font_draw_text_builtin(36, fb, 30, title_y, "系统设置", GFX_BLACK);
 
-    draw_section_header(fb, section_x, 150 - scroll, "网络与连接");
-    draw_settings_group_box(fb, group_x, 184 - scroll, group_w, row_h * 2, 7);
-    settings_draw_selection(fb, app, 0, 184 - scroll, row_h);
-    settings_draw_item(fb, 184 - scroll, row_h, SETTINGS_ICON_WIFI, "Wi-Fi",
-                       app->wifi_connected ? "已连接" : "未连接", -1);
-    settings_divider(fb, 184 + row_h - scroll);
-    settings_draw_selection(fb, app, 1, 184 + row_h - scroll, row_h);
-    settings_draw_item(fb, 184 + row_h - scroll, row_h, SETTINGS_ICON_BLUETOOTH, "蓝牙", "已关闭", -1);
+    if (app->settings_selection < APP_SETTINGS_ITEMS_PER_PAGE) {
+        draw_section_header(fb, section_x, 150, "网络与连接");
+        draw_settings_group_box(fb, group_x, 184, group_w, row_h * 2, 7);
+        settings_draw_selection(fb, app, 0, 184, row_h);
+        settings_draw_item(fb, 184, row_h, SETTINGS_ICON_WIFI, "Wi-Fi",
+                           app->wifi_connected ? "已连接" : "未连接", -1);
+        settings_divider(fb, 184 + row_h);
+        settings_draw_selection(fb, app, 1, 184 + row_h, row_h);
+        settings_draw_item(fb, 184 + row_h, row_h, SETTINGS_ICON_BLUETOOTH, "蓝牙", "已关闭", -1);
 
-    draw_section_header(fb, section_x, 330 - scroll, "系统与时间");
-    draw_settings_group_box(fb, group_x, 364 - scroll, group_w, row_h * 2, 7);
-    settings_draw_selection(fb, app, 2, 364 - scroll, row_h);
-    settings_draw_item(fb, 364 - scroll, row_h, SETTINGS_ICON_WEATHER, "天气城市", cities[city], -1);
-    settings_divider(fb, 364 + row_h - scroll);
-    settings_draw_selection(fb, app, 3, 364 + row_h - scroll, row_h);
-    {
-        char sync_text[32];
-        char time_text[8];
-        ui_format_time(time_text, sizeof(time_text));
-        snprintf(sync_text, sizeof(sync_text), "已同步 %s", time_text);
-        settings_draw_item(fb, 364 + row_h - scroll, row_h, SETTINGS_ICON_CLOCK, "时间同步", sync_text, -1);
+        draw_section_header(fb, section_x, 330, "系统与时间");
+        draw_settings_group_box(fb, group_x, 364, group_w, row_h * 2, 7);
+        settings_draw_selection(fb, app, 2, 364, row_h);
+        settings_draw_item(fb, 364, row_h, SETTINGS_ICON_WEATHER, "天气城市", cities[city], -1);
+        settings_divider(fb, 364 + row_h);
+        settings_draw_selection(fb, app, 3, 364 + row_h, row_h);
+        {
+            char sync_text[32];
+            char time_text[8];
+            ui_format_time(time_text, sizeof(time_text));
+            snprintf(sync_text, sizeof(sync_text), "已同步 %s", time_text);
+            settings_draw_item(fb, 364 + row_h, row_h, SETTINGS_ICON_CLOCK, "时间同步", sync_text, -1);
+        }
+
+        draw_section_header(fb, section_x, 510, "电源与性能");
+        draw_settings_group_box(fb, group_x, 544, group_w, row_h * 2, 7);
+        settings_draw_selection(fb, app, 4, 544, row_h);
+        settings_draw_item(fb, 544, row_h, SETTINGS_ICON_LEAF, "电池节能模式", "", app->power_saving_enabled ? 1 : 0);
+        settings_divider(fb, 544 + row_h);
+        settings_draw_selection(fb, app, 5, 544 + row_h, row_h);
+        settings_draw_item(fb, 544 + row_h, row_h, SETTINGS_ICON_STORAGE, "存储空间", "已使用 12.6GB / 32GB", -1);
+
+        settings_draw_dynamic_value(fb, 184,
+                                    app->wifi_connected ? "Connected" : "Configure");
+        settings_draw_dynamic_value(fb, 240,
+                                    app->bluetooth_enabled ? "On" : "Off");
+        settings_draw_dynamic_value(fb, 420,
+                                    app->time_sync_requested ? "Starting..." : "Sync now");
+        settings_draw_dynamic_value(fb, 600, "Open SD files");
+    } else {
+        const int page_offset = 540;
+
+        draw_section_header(fb, section_x, 690 - page_offset, "内容与服务");
+        draw_settings_group_box(fb, group_x, 724 - page_offset, group_w, row_h, 7);
+        settings_draw_selection(fb, app, 6, 724 - page_offset, row_h);
+        settings_draw_item(fb, 724 - page_offset, row_h, SETTINGS_ICON_DICT, "字典管理", "已安装 3 个字典", -1);
+
+        draw_section_header(fb, section_x, 820 - page_offset, "关于与更新");
+        draw_settings_group_box(fb, group_x, 854 - page_offset, group_w, row_h * 2, 7);
+        settings_draw_selection(fb, app, 7, 854 - page_offset, row_h);
+        settings_draw_item(fb, 854 - page_offset, row_h, SETTINGS_ICON_INFO, "关于设备", "型号 Reader X", -1);
+        settings_divider(fb, 854 + row_h - page_offset);
+        settings_draw_selection(fb, app, 8, 854 + row_h - page_offset, row_h);
+        settings_draw_item(fb, 854 + row_h - page_offset, row_h, SETTINGS_ICON_UPDATE, "软件更新", "当前版本 1.2.0", -1);
+
+        draw_settings_group_box(fb, group_x, 966 - page_offset, group_w, row_h * 2, 7);
+        settings_draw_selection(fb, app, 9, 966 - page_offset, row_h);
+        settings_draw_item(fb, 966 - page_offset, row_h, SETTINGS_ICON_DICT,
+                           "系统字体", system_font_name, -1);
+        settings_divider(fb, 966 + row_h - page_offset);
+        settings_draw_selection(fb, app, 10, 966 + row_h - page_offset, row_h);
+        settings_draw_item(fb, 966 + row_h - page_offset, row_h, SETTINGS_ICON_STORAGE,
+                           "书架布局", app->bookshelf_layout == 0 ? "网格" : "列表", -1);
+
+        settings_draw_dynamic_value(fb, 724 - page_offset,
+                                    app->dictionary_enabled ? "Enabled" : "Disabled");
+        settings_draw_dynamic_value(fb, 910 - page_offset,
+                                    app->update_check_requested ? "Checking..." : "Check now");
     }
-
-    draw_section_header(fb, section_x, 510 - scroll, "电源与性能");
-    draw_settings_group_box(fb, group_x, 544 - scroll, group_w, row_h * 2, 7);
-    settings_draw_selection(fb, app, 4, 544 - scroll, row_h);
-    settings_draw_item(fb, 544 - scroll, row_h, SETTINGS_ICON_LEAF, "电池节能模式", "", app->power_saving_enabled ? 1 : 0);
-    settings_divider(fb, 544 + row_h - scroll);
-    settings_draw_selection(fb, app, 5, 544 + row_h - scroll, row_h);
-    settings_draw_item(fb, 544 + row_h - scroll, row_h, SETTINGS_ICON_STORAGE, "存储空间", "已使用 12.6GB / 32GB", -1);
-
-    draw_section_header(fb, section_x, 690 - scroll, "内容与服务");
-    draw_settings_group_box(fb, group_x, 724 - scroll, group_w, row_h, 7);
-    settings_draw_selection(fb, app, 6, 724 - scroll, row_h);
-    settings_draw_item(fb, 724 - scroll, row_h, SETTINGS_ICON_DICT, "字典管理", "已安装 3 个字典", -1);
-
-    draw_section_header(fb, section_x, 820 - scroll, "关于与更新");
-    draw_settings_group_box(fb, group_x, 854 - scroll, group_w, row_h * 2, 7);
-    settings_draw_selection(fb, app, 7, 854 - scroll, row_h);
-    settings_draw_item(fb, 854 - scroll, row_h, SETTINGS_ICON_INFO, "关于设备", "型号 Reader X", -1);
-    settings_divider(fb, 854 + row_h - scroll);
-    settings_draw_selection(fb, app, 8, 854 + row_h - scroll, row_h);
-    settings_draw_item(fb, 854 + row_h - scroll, row_h, SETTINGS_ICON_UPDATE, "软件更新", "当前版本 1.2.0", -1);
-
-    draw_settings_group_box(fb, group_x, 966 - scroll, group_w, row_h * 2, 7);
-    settings_draw_selection(fb, app, 9, 966 - scroll, row_h);
-    settings_draw_item(fb, 966 - scroll, row_h, SETTINGS_ICON_DICT,
-                       "系统字体", system_font_name, -1);
-    settings_divider(fb, 966 + row_h - scroll);
-    settings_draw_selection(fb, app, 10, 966 + row_h - scroll, row_h);
-    settings_draw_item(fb, 966 + row_h - scroll, row_h, SETTINGS_ICON_STORAGE,
-                       "书架布局", app->bookshelf_layout == 0 ? "网格" : "列表", -1);
-
-    settings_draw_dynamic_value(fb, 184 - scroll,
-                                app->wifi_connected ? "Connected" : "Configure");
-    settings_draw_dynamic_value(fb, 240 - scroll,
-                                app->bluetooth_enabled ? "On" : "Off");
-    settings_draw_dynamic_value(fb, 420 - scroll,
-                                app->time_sync_requested ? "Starting..." : "Sync now");
-    settings_draw_dynamic_value(fb, 600 - scroll, "Open SD files");
-    settings_draw_dynamic_value(fb, 724 - scroll,
-                                app->dictionary_enabled ? "Enabled" : "Disabled");
-    settings_draw_dynamic_value(fb, 910 - scroll,
-                                app->update_check_requested ? "Checking..." : "Check now");
 
     home_status_bar(fb, font);
 }

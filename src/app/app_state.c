@@ -17,7 +17,6 @@
 #define WEATHER_SCROLL_MAX 190
 #define CALENDAR_DAYS_IN_MONTH 30
 #define SETTINGS_COUNT 11
-#define SETTINGS_SCROLL_MAX 332
 static const char wifi_edit_characters[] =
     " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.@!#";
 
@@ -235,7 +234,6 @@ void app_init(app_state_t *app) {
         app->english_answer_state[i] = 0;
     }
     app->settings_selection = 0;
-    app->settings_scroll = 0;
     app->bluetooth_enabled = 0;
     app->dictionary_enabled = 1;
     app->time_sync_requested = 0;
@@ -711,20 +709,6 @@ static void handle_secondary_page(app_state_t *app, app_button_t button) {
                         break;
                     default:
                         break;
-                }
-            }
-            {
-                static const int row_y[SETTINGS_COUNT] = {184, 240, 364, 420, 544, 600, 724, 854, 910, 966, 1022};
-                int selected_y = row_y[app->settings_selection];
-                if (selected_y - app->settings_scroll > 690) {
-                    app->settings_scroll = selected_y - 690;
-                } else if (selected_y - app->settings_scroll < 150) {
-                    app->settings_scroll = selected_y - 150;
-                }
-                if (app->settings_scroll < 0) {
-                    app->settings_scroll = 0;
-                } else if (app->settings_scroll > SETTINGS_SCROLL_MAX) {
-                    app->settings_scroll = SETTINGS_SCROLL_MAX;
                 }
             }
             break;

@@ -833,7 +833,11 @@ void app_main(void) {
                  * waveform. The display driver still performs an occasional
                  * full refresh after its cumulative ghosting limit.
                  */
-                if (reader_content_changed) {
+                if (previous_page == APP_PAGE_SETTINGS && app.page == APP_PAGE_SETTINGS &&
+                    previous_app.settings_selection / APP_SETTINGS_ITEMS_PER_PAGE !=
+                        app.settings_selection / APP_SETTINGS_ITEMS_PER_PAGE) {
+                    present_result = esp_display_present(&display, fb);
+                } else if (reader_content_changed) {
                     present_result = esp_display_present_partial(
                         &display, fb, 0, 32, GFX_WIDTH, GFX_HEIGHT - 32);
                 } else {

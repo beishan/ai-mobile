@@ -1,6 +1,8 @@
 #ifndef APP_STATE_H
 #define APP_STATE_H
 
+#define APP_SETTINGS_ITEMS_PER_PAGE 6
+
 typedef enum {
     APP_PAGE_HOME = 0,
     APP_PAGE_BOOKSHELF,
@@ -101,7 +103,6 @@ typedef struct {
     int english_review_count;
     int english_answer_state[APP_ENGLISH_WORD_COUNT];
     int settings_selection;
-    int settings_scroll;
     int bluetooth_enabled;
     int dictionary_enabled;
     int time_sync_requested;

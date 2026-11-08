@@ -407,16 +407,17 @@ static void test_settings_page_selects_items_with_up_down_buttons(void) {
     app_init(&app);
     app.page = APP_PAGE_SETTINGS;
 
-    ASSERT_EQ_INT(0, app.settings_scroll);
     app_handle_button(&app, APP_BUTTON_DOWN);
     ASSERT_EQ_INT(1, app.settings_selection);
-    ASSERT_EQ_INT(0, app.settings_scroll);
     app_handle_button(&app, APP_BUTTON_UP);
     ASSERT_EQ_INT(0, app.settings_selection);
-    ASSERT_EQ_INT(0, app.settings_scroll);
     app_handle_button(&app, APP_BUTTON_UP);
     ASSERT_EQ_INT(10, app.settings_selection);
-    ASSERT_TRUE(app.settings_scroll > 0);
+    app_handle_button(&app, APP_BUTTON_DOWN);
+    ASSERT_EQ_INT(0, app.settings_selection);
+    app.settings_selection = APP_SETTINGS_ITEMS_PER_PAGE - 1;
+    app_handle_button(&app, APP_BUTTON_DOWN);
+    ASSERT_EQ_INT(APP_SETTINGS_ITEMS_PER_PAGE, app.settings_selection);
 }
 
 static void test_weather_page_scrolls_while_changing_city(void) {
@@ -1349,27 +1350,26 @@ static void test_settings_page_matches_design_skeleton(void) {
     font_free(&font);
 }
 
-static void test_settings_render_uses_scroll_offset_below_status_bar(void) {
+static void test_settings_render_uses_fixed_pages_below_status_bar(void) {
     gfx_framebuffer_t top_fb;
-    gfx_framebuffer_t scrolled_fb;
+    gfx_framebuffer_t second_page_fb;
     app_state_t app;
     font_t font;
 
     ASSERT_EQ_INT(1, font_load_default(&font));
     gfx_init(&top_fb);
-    gfx_init(&scrolled_fb);
+    gfx_init(&second_page_fb);
     app_init(&app);
     app.page = APP_PAGE_SETTINGS;
-    app.settings_scroll = 0;
     ui_render_page(&top_fb, &app, &font);
 
-    app.settings_scroll = 120;
-    ui_render_page(&scrolled_fb, &app, &font);
+    app.settings_selection = APP_SETTINGS_ITEMS_PER_PAGE;
+    ui_render_page(&second_page_fb, &app, &font);
 
-    assert_uses_home_status_bar(&scrolled_fb);
-    ASSERT_TRUE(!framebuffers_equal(&top_fb, &scrolled_fb));
+    assert_uses_home_status_bar(&second_page_fb);
+    ASSERT_TRUE(!framebuffers_equal(&top_fb, &second_page_fb));
     ASSERT_TRUE(count_color_in_region(&top_fb, GFX_BLACK, 30, 78, 190, 48) > 120);
-    ASSERT_TRUE(count_color_in_region(&scrolled_fb, GFX_BLACK, 30, 690, 190, 80) > 120);
+    ASSERT_TRUE(count_color_in_region(&second_page_fb, GFX_BLACK, 30, 150, 190, 80) > 120);
     font_free(&font);
 }
 
@@ -1676,7 +1676,7 @@ static void test_weather_page_matches_design2_skeleton(void) {
     font_free(&font);
 }
 
-static void test_weather_render_uses_scroll_offset_below_status_bar(void) {
+static void test_weather_render_uses_fixed_pages_below_status_bar(void) {
     gfx_framebuffer_t top_fb;
     gfx_framebuffer_t scrolled_fb;
     app_state_t app;
@@ -1846,7 +1846,7 @@ int main(void) {
     test_reader_body_renders_text_in_content_area();
     test_reader_main_matches_design_skeleton();
     test_settings_page_matches_design_skeleton();
-    test_settings_render_uses_scroll_offset_below_status_bar();
+    test_settings_render_uses_fixed_pages_below_status_bar();
     test_settings_builtin_font_contains_all_labels();
     test_reader_settings_builtin_font_contains_all_labels();
     test_reader_catalog_builtin_font_contains_all_labels();
@@ -1857,7 +1857,7 @@ int main(void) {
     test_calendar_page_matches_design2_skeleton();
     test_system_time_labels_are_not_hardcoded();
     test_calendar_page_selects_current_system_date();
-    test_weather_render_uses_scroll_offset_below_status_bar();
+    test_weather_render_uses_fixed_pages_below_status_bar();
     test_system_pages_render_with_external_glyph_fallback();
     test_reader_body_uses_loaded_external_fonts();
     test_reader_body_changes_when_external_font_choice_changes();
